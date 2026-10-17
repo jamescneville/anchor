@@ -58,19 +58,12 @@ public sealed class MainWindow : Window
         var where = Ui.Primary("Where was I?");
         where.ToolTip = $"Global hotkey: {_engine.Settings.Hotkey}";
         where.Click += (_, _) => new RecoveryWindow(_engine, false).Show();
-        var ask = Ui.Secondary("Ask Claude  ▾");
-        ask.Click += (_, _) => Ui.ShowMenu(ask,
-            ("Plan my day in Claude", () => Ask(ClaudeAsk.PlanDay)),
-            ("Triage my inbox in Claude", () => Ask(ClaudeAsk.TriageInbox)),
-            ("Where was I? (quick chat)", () => Ask(ClaudeAsk.WhereWasI)),
-            ("", null),
-            ("Open a new Claude chat", () => Ask(ClaudeAsk.NewChat)));
         var refresh = Ui.IconButton("\uE72C", "Refresh calendars and mail now");
         refresh.Click += (_, _) => _ = _engine.RefreshAllAsync(forceMessages: true);
         var settings = Ui.IconButton("\uE713", "Settings");
         settings.Click += (_, _) => new SettingsWindow(_engine).Show();
         settings.Margin = new Thickness(0);
-        actions.Children.Add(where); actions.Children.Add(ask); actions.Children.Add(refresh); actions.Children.Add(settings);
+        actions.Children.Add(where); actions.Children.Add(refresh); actions.Children.Add(settings);
         DockPanel.SetDock(actions, Dock.Right);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(actions, true);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(_chips, true);
@@ -113,7 +106,7 @@ public sealed class MainWindow : Window
         DockPanel.SetDock(_planBtn, Dock.Right);
         planHead.Children.Add(_planBtn);
         planHead.Children.Add(planLabel);
-        var planBody = new ScrollViewer { MaxHeight = 150, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
+        var planBody = new ScrollViewer { MaxHeight = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
         var planCard = Ui.Card(new StackPanel { Children = { planHead, planBody, _planWhen } });
         Grid.SetRow(planCard, 3);
         root.Children.Add(planCard);
@@ -129,16 +122,6 @@ public sealed class MainWindow : Window
         _clock.Start();
         Closing += (_, e) => { if (App.Exiting) { _clock.Stop(); return; } e.Cancel = true; Hide(); }; // lives in the tray
         Render();
-    }
-
-    void Ask(ClaudeAsk what)
-    {
-        try
-        {
-            if (what == ClaudeAsk.NewChat) ClaudeDesktop.Launch("claude://claude.ai/new?surface=chat");
-            else _engine.AskClaude(what);
-        }
-        catch (Exception ex) { MessageBox.Show("Couldn't open Claude desktop: " + ex.Message, "Anchor"); }
     }
 
     static UIElement Scroll(string label, Panel body)
@@ -214,9 +197,23 @@ public sealed class MainWindow : Window
             c.MouseLeftButtonUp += (_, _) => new SettingsWindow(_engine).Show();
             _chips.Children.Add(c);
         }
-        _chips.Children.Add(_engine.Claude is null
-            ? Ui.Chip("AI off", "neutral", "✦")
-            : Ui.Chip($"${_engine.Budget.SpentToday:0.00} today", _engine.Budget.CutOff ? "alarm" : _engine.Budget.Warn ? "warn" : "accent", "✦"));
+        if (_engine.Claude is null)
+        {
+            var off = Ui.Chip("AI off", "neutral", "✦");
+            off.Cursor = Cursors.Hand;
+            off.ToolTip = _engine.CliMissing ? "Claude app not found on this PC. Click for Settings." : "Click to turn on AI in Settings.";
+            off.MouseLeftButtonUp += (_, _) => new SettingsWindow(_engine).Show();
+            _chips.Children.Add(off);
+        }
+        else if (_engine.AiBusy) _chips.Children.Add(Ui.Chip("Claude is working…", "accent", "✦"));
+        else if (_engine.UsingApi)
+            _chips.Children.Add(Ui.Chip($"${_engine.Budget.SpentToday:0.00} today", _engine.Budget.CutOff ? "alarm" : _engine.Budget.Warn ? "warn" : "accent", "✦"));
+        else
+        {
+            var c = Ui.Chip("Claude", "accent", "✦");
+            c.ToolTip = "AI runs silently through your signed-in Claude account.";
+            _chips.Children.Add(c);
+        }
     }
 
     async Task ConnectAsync(string provider)
@@ -293,13 +290,13 @@ public sealed class MainWindow : Window
         if (text.Length > 0)
         {
             _plan.Text = text; _plan.Foreground = Ui.B("Fg");
-            _planWhen.Text = _planOverride.Length > 0 ? "" : fromClaude ? $"From Claude desktop · {Fmt.Time(st.BridgePlanAt!.Value)}" : st.LastPlanAt is { } t ? $"Anchor AI · {Fmt.Time(t)}" : "";
+            _planWhen.Text = _planOverride.Length > 0 ? "" : fromClaude ? $"From Claude desktop · {Fmt.Time(st.BridgePlanAt!.Value)}" : st.LastPlanAt is { } t ? $"{(_engine.UsingApi ? "Anthropic API" : "Claude")} · {Fmt.Time(t)}" : "";
             return;
         }
         _planWhen.Text = "";
         _plan.Foreground = Ui.B("Dim");
         _plan.Text = _engine.Claude is null
-            ? "Add your Anthropic API key in Settings to get an AI plan built around your meetings."
+            ? "Turn on AI in Settings (use your Claude login, or add an API key) to get a plan built around your meetings."
             : "Press “Plan my day” for a realistic plan around your meetings and open follow-ups.";
     }
 

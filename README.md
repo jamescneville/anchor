@@ -47,18 +47,19 @@ Skylight has no public API; it mirrors a Google/Outlook/iCloud calendar. Anchor 
 - No screenshots, keystroke capture or window tracking. Focus support is a manual current task, a check-in
   prompt every `CheckInMinutes` during work hours, and the recovery hotkey.
 
-## Claude desktop bridge (no API key needed)
+## Claude login: AI without an API key
 
-Anchor can hand work to the Claude desktop app you already run, and take results back:
+If no Anthropic API key is saved, Anchor uses the Claude account already signed in on this PC by running the local Claude Code CLI
+headless (`claude -p`): no window opens and nothing needs approving. Each call is one tool-less turn with no MCP servers, settings or
+saved session, so it is cheap and can't act on anything. It powers **Plan my day**, the morning/evening briefs, **Where was I?** and
+automatic inbox triage, and the results appear in Anchor (a "Claude is working..." chip shows while it runs). The CLI is found
+automatically (Windows Store build or a normal install); override with `ClaudeDesktop.CliPath`. If an API key is saved it takes priority.
 
-- **Ask Claude** (header menu, tray menu, and the "Where was I?" window) opens Claude desktop through its `claude://` links with a
-  ready prompt built from your Anchor agenda and follow-ups. Nothing is sent for you: the prompt lands in the composer and you press Enter.
-  *Plan my day* and *Triage my inbox* start a Cowork task given the bridge folder; *Where was I?* is a plain chat.
-- **Bridge folder** (`%LOCALAPPDATA%\Anchorridge`): Claude writes `plan.md` (shown in the Plan card, labelled "From Claude desktop")
-  and `tasks.json` (added to Needs attention). Anchor only reads these files, treats them as untrusted text, and only opens http(s) links.
-  Format of `tasks.json`: `[{"id","title","source","from","link","due","confidence"}]`.
-- A **scheduled Claude task** can write the same files on a timer, so the plan and triage refresh without you asking.
-- `Settings → Claude desktop → Include work meetings and follow-ups` controls whether work items are redacted from these prompts.
+- Work items are redacted unless you switch on *Include work items* (Settings → Claude login). The API path has its own switch.
+- Only one Claude process runs at a time and token-refresh collisions with the desktop app are retried automatically.
+- **Optional file bridge:** anything that writes `plan.md` and/or `tasks.json` into `%LOCALAPPDATA%/Anchor/bridge` (for example a
+  scheduled Claude task) shows up in the Plan card and Needs attention. Anchor only reads these files, treats them as untrusted text and
+  only opens http(s) links. `tasks.json` is `[{"id","title","source","from","link","due","confidence"}]`.
 
 ## Redaction before AI
 

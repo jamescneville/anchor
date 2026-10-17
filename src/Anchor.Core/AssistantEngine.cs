@@ -29,7 +29,10 @@ public sealed class AssistantEngine : IDisposable
     public StateStore Store { get; }
     public TokenStore Tokens { get; } = new();
     public BudgetTracker Budget { get; }
-    public ClaudeService? Claude { get; private set; }
+    public AiBackend? Claude { get; private set; }
+    int _aiBusy;
+    public bool AiBusy => _aiBusy > 0;
+    public bool UsingApi => Claude is ClaudeService;
     public Dictionary<string, string> SourceErrors { get; } = new();
 
     public event Action<DueAlert>? AlertDue;
@@ -47,12 +50,23 @@ public sealed class AssistantEngine : IDisposable
         BuildSources();
     }
 
+    public bool CliMissing { get; private set; }
     public const string AnthropicKeyName = "anthropic";
     public AnchorSettings Settings => _settings;
 
+    /// <summary>The API path and the Claude-login path have separate work-content switches.</summary>
+    bool WorkAllowedForAi => Claude is ClaudeService ? _settings.Ai.SendWorkContentToClaude : _settings.ClaudeDesktop.IncludeWorkContext;
+
+    async Task<T> Busy<T>(Func<Task<T>> work)
+    {
+        Interlocked.Increment(ref _aiBusy); Changed?.Invoke();
+        try { return await work(); }
+        finally { Interlocked.Decrement(ref _aiBusy); Changed?.Invoke(); }
+    }
+
     IReadOnlySet<string> WorkIcsSources => _settings.IcsFeeds.Where(f => f.IsWork).Select(f => "ICS/" + f.Name).ToHashSet();
-    IReadOnlyList<CalendarEvent> ForAi(IEnumerable<CalendarEvent> e) => AiPrivacy.Events(e, _settings.Ai.SendWorkContentToClaude, WorkIcsSources);
-    IReadOnlyList<SuggestedTask> ForAi(IEnumerable<SuggestedTask> t) => AiPrivacy.Tasks(t, _settings.Ai.SendWorkContentToClaude, WorkIcsSources);
+    IReadOnlyList<CalendarEvent> ForAi(IEnumerable<CalendarEvent> e) => AiPrivacy.Events(e, WorkAllowedForAi, WorkIcsSources);
+    IReadOnlyList<SuggestedTask> ForAi(IEnumerable<SuggestedTask> t) => AiPrivacy.Tasks(t, WorkAllowedForAi, WorkIcsSources);
 
     public void SaveAnthropicKey(string key)
     {
@@ -69,8 +83,14 @@ public sealed class AssistantEngine : IDisposable
     {
         var key = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         if (string.IsNullOrWhiteSpace(key)) key = Tokens.Get(AnthropicKeyName)?.AccessToken; // saved via the settings window (DPAPI)
-        if (string.IsNullOrWhiteSpace(key) || !_settings.Ai.Enabled) return;
-        Claude = new ClaudeService(new AnthropicClient { ApiKey = key }, _settings.Ai, Budget);
+        if (!string.IsNullOrWhiteSpace(key) && _settings.Ai.Enabled)
+        {
+            Claude = new ClaudeService(new AnthropicClient { ApiKey = key }, _settings.Ai, Budget);   // an API key takes priority
+            return;
+        }
+        var cd = _settings.ClaudeDesktop;
+        if (cd.Enabled && ClaudeCliBackend.Locate(cd.CliPath) is { } exe) Claude = new ClaudeCliBackend(exe, cd);
+        else CliMissing = cd.Enabled;
     }
 
     void BuildSources()
@@ -168,17 +188,6 @@ public sealed class AssistantEngine : IDisposable
             if (changed) Changed?.Invoke();
         }
         catch (Exception ex) { SourceErrors["Claude bridge"] = ex.Message; }
-    }
-
-    /// <summary>Opens Claude desktop with a ready-to-send prompt (you press Enter there).</summary>
-    public void AskClaude(ClaudeAsk ask)
-    {
-        var cd = _settings.ClaudeDesktop;
-        var now = DateTimeOffset.Now;
-        var events = AiPrivacy.Events(Store.State.CachedEvents, cd.IncludeWorkContext, WorkIcsSources);
-        var tasks = AiPrivacy.Tasks(Store.State.Tasks, cd.IncludeWorkContext, WorkIcsSources);
-        var prompt = ClaudeDesktop.BuildPrompt(ask, Store.State, now, events, tasks);
-        ClaudeDesktop.Launch(ClaudeDesktop.Url(ask, prompt, Bridge.Dir));
     }
 
     async Task LoopAsync()
@@ -358,7 +367,7 @@ public sealed class AssistantEngine : IDisposable
         if (newItems.Count == 0) return;
 
         var created = new List<SuggestedTask>();
-        var aiEligible = newItems.Where(i => !i.IsWork || _settings.Ai.SendWorkContentToClaude).ToList();
+        var aiEligible = newItems.Where(i => !i.IsWork || WorkAllowedForAi).ToList();
         var local = newItems.Except(aiEligible).ToList();
 
         // Local heuristics for anything we will not (or cannot) send to Claude.
@@ -373,7 +382,7 @@ public sealed class AssistantEngine : IDisposable
                 try
                 {
                     var byId = chunk.ToDictionary(i => i.Id);
-                    foreach (var c in await Claude.ClassifyAsync(chunk, _cts.Token))
+                    foreach (var c in await Busy(() => Claude.ClassifyAsync(chunk, _cts.Token)))
                     {
                         if (!byId.TryGetValue(c.Id, out var item)) continue;
                         classifiedIds.Add(c.Id);
@@ -427,13 +436,13 @@ public sealed class AssistantEngine : IDisposable
 
     public async Task<string> PlanDayAsync(bool eveningSweep = false)
     {
-        if (Claude is null) return "AI is off: add your Anthropic API key in Settings and restart Anchor.";
-        if (!Budget.Allow(background: false)) return "AI budget limit reached for this month. " + Budget.Summary;
+        if (Claude is null) return CliMissing ? "Couldn't find the Claude app on this PC. Install it and sign in, or add an Anthropic API key in Settings." : "AI is off. In Settings, turn on 'Use my Claude login' or add an Anthropic API key.";
+        if (!Claude.Allow(background: false)) return "AI budget limit reached for this month. " + Budget.Summary;
         var now = DateTimeOffset.Now;
-        var plan = await Claude.PlanDayAsync(
+        var plan = await Busy(() => Claude.PlanDayAsync(
             ForAi(Store.State.CachedEvents.Where(e => e.End > now && e.Start < now.AddHours(36))),
             ForAi(Store.State.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).Take(12)),
-            Store.State.CurrentTask, eveningSweep, _cts.Token);
+            Store.State.CurrentTask, eveningSweep, _cts.Token));
         if (!eveningSweep) Store.Mutate(s => { s.LastPlan = plan; s.LastPlanAt = DateTimeOffset.Now; });
         return plan;
     }
@@ -463,11 +472,11 @@ public sealed class AssistantEngine : IDisposable
 
     public async Task<string?> RecoverAiAsync()
     {
-        if (Claude is null || !Budget.Allow(background: false)) return null;
+        if (Claude is null || !Claude.Allow(background: false)) return null;
         var st = Store.State;
         var next = AlertScheduler.NextEvent(ForAi(st.CachedEvents), DateTimeOffset.Now);
-        return await Claude.RecoverAsync(st.CurrentTask, st.Checkpoint, next,
-            ForAi(st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)), _cts.Token);
+        return await Busy(() => Claude.RecoverAsync(st.CurrentTask, st.Checkpoint, next,
+            ForAi(st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)), _cts.Token));
     }
 
     public void Dispose()

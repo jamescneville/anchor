@@ -47,12 +47,10 @@ public sealed class SettingsWindow : Window
         Field("Daily soft cap", "USD; limits background triage only", _s.Ai.DailySoftCapUsd.ToString(), v => _s.Ai.DailySoftCapUsd = ParseDouble(v, _s.Ai.DailySoftCapUsd), 90);
         Field("Hard cut-off", "USD; AI stops entirely at this monthly spend", _s.Ai.CutoffUsd.ToString(), v => _s.Ai.CutoffUsd = ParseDouble(v, _s.Ai.CutoffUsd), 90);
 
-        Section("Claude desktop", "“Ask Claude” opens the Claude app with a ready prompt. Results can flow back through the bridge folder.");
-        Toggle("Include work meetings and follow-ups in those prompts", "Goes to your organisation's own Claude account. Turn off to redact work items first.", _s.ClaudeDesktop.IncludeWorkContext, v => _s.ClaudeDesktop.IncludeWorkContext = v);
-        var folder = Ui.Secondary("Open bridge folder");
-        folder.Margin = new Thickness(0);
-        folder.Click += (_, _) => Process.Start(new ProcessStartInfo(Bridge.Dir) { UseShellExecute = true });
-        _section.Children.Add(Row("Bridge folder", "Claude writes plan.md and tasks.json here; Anchor only reads them.", folder));
+        Section("Claude login (no API key)", "Anchor can use the Claude account already signed in on this PC. It runs silently in the background: no window, nothing to approve.");
+        Toggle("Use my Claude login", "Used when no API key is saved. Plans, inbox triage and “Where was I?” run quietly and show up here.", _s.ClaudeDesktop.Enabled, v => _s.ClaudeDesktop.Enabled = v);
+        Toggle("Include work items", "Lets Claude see work meetings and Outlook / Teams / Slack items. Off keeps them redacted. Turn on only if your organisation allows it.", _s.ClaudeDesktop.IncludeWorkContext, v => _s.ClaudeDesktop.IncludeWorkContext = v);
+        CliRow();
         EndSection();
 
         Section("Google", "Gmail and every calendar on the account, including the one Skylight syncs from.");
@@ -175,6 +173,23 @@ public sealed class SettingsWindow : Window
         var box = new PasswordBox { Password = value, Width = 300 };
         _section.Children.Add(Row(label, hint, box));
         _apply.Add(() => set(box.Password));
+    }
+
+    void CliRow()
+    {
+        var exe = ClaudeCliBackend.Locate(_s.ClaudeDesktop.CliPath);
+        var test = Ui.Secondary("Test");
+        test.Margin = new Thickness(0);
+        var result = new TextBlock { FontSize = 12, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, MaxWidth = 300, TextAlignment = TextAlignment.Right,
+            Foreground = Ui.B(exe is null ? "Warn" : "Dim"), Text = exe is null ? "Claude app not found on this PC." : "Claude app found." };
+        test.IsEnabled = exe is not null;
+        test.Click += async (_, _) =>
+        {
+            test.IsEnabled = false; result.Foreground = Ui.B("Dim"); result.Text = "Testing… (a few seconds)";
+            var (ok, msg) = await new ClaudeCliBackend(exe!, _s.ClaudeDesktop).TestAsync(CancellationToken.None);
+            result.Foreground = Ui.B(ok ? "Ok" : "Alarm"); result.Text = msg; test.IsEnabled = true;
+        };
+        _section.Children.Add(Row("Test Claude login", "Makes one tiny request.", new StackPanel { Children = { test, result } }));
     }
 
     void KeyRow()

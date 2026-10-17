@@ -58,12 +58,17 @@ public sealed class IcsFeed
 
 public sealed class ClaudeDesktopSettings
 {
+    /// <summary>Use the Claude account already signed in on this PC (through the local Claude Code CLI), silently, with no API key.</summary>
     public bool Enabled { get; set; } = true;
     /// <summary>
-    /// Work meeting titles and work follow-ups are included in prompts handed to the Claude desktop app
-    /// (your organisation's own Claude account). Turn off to redact them like the API path does.
+    /// Work meetings (Outlook, work ICS) and work follow-ups/messages (Outlook, Teams, Slack) are included in what Claude sees.
+    /// Off by default: work items are redacted first. Turn on only if your organisation allows it for its Claude account.
     /// </summary>
-    public bool IncludeWorkContext { get; set; } = true;
+    public bool IncludeWorkContext { get; set; }
+    /// <summary>Optional full path to claude.exe; auto-detected when empty.</summary>
+    public string CliPath { get; set; } = "";
+    public string FastModel { get; set; } = "haiku";
+    public string PlanModel { get; set; } = "sonnet";
 }
 
 public sealed class AiSettings

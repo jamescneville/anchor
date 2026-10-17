@@ -43,11 +43,9 @@ public sealed class RecoveryWindow : Window
         save.Click += (_, _) => Commit();
         var note = Ui.Secondary("Save as note");
         note.Click += (_, _) => { if (_task.Text.Trim().Length > 0) _engine.SaveCheckpoint(_task.Text.Trim()); Refresh(); };
-        var askClaude = Ui.Secondary("Ask Claude");
-        askClaude.Click += (_, _) => { try { _engine.AskClaude(ClaudeAsk.WhereWasI); } catch (Exception ex) { _ai.Text = "Couldn't open Claude desktop: " + ex.Message; _ai.Visibility = Visibility.Visible; } };
         var close = Ui.Secondary("Close");
         close.Click += (_, _) => Close();
-        row.Children.Add(save); row.Children.Add(note); row.Children.Add(askClaude); row.Children.Add(close);
+        row.Children.Add(save); row.Children.Add(note); row.Children.Add(close);
         st.Children.Add(row);
         Content = st;
 

@@ -323,58 +323,49 @@ public class BridgeTests
     }
 }
 
-public class ClaudeDesktopTests
+public class ClaudeCliTests
 {
-    static readonly DateTimeOffset Now = new(2026, 10, 19, 9, 0, 0, TimeSpan.FromHours(-4));
-
-    static CalendarEvent Ev(string title, int inMin) =>
-        new("e" + inMin, "Google", title, Now.AddMinutes(inMin), Now.AddMinutes(inMin + 30));
+    [Fact]
+    public void Returns_the_result_text_from_the_json_envelope() =>
+        Assert.Equal("{\"plan\":\"x\"}", ClaudeCliBackend.ParseResult("{\"is_error\":false,\"result\":\"{\\\"plan\\\":\\\"x\\\"}\"}", "", 0));
 
     [Fact]
-    public void Plan_and_triage_open_cowork_with_the_bridge_folder()
+    public void Token_refresh_collisions_are_reported_as_transient() =>
+        Assert.Throws<TransientCliException>(() => ClaudeCliBackend.ParseResult(
+            "{\"is_error\":true,\"result\":\"Failed to refresh OAuth token: another Claude Code process is refreshing it\"}", "", 1));
+
+    [Fact]
+    public void Signed_out_gets_a_friendly_message()
     {
-        var url = ClaudeDesktop.Url(ClaudeAsk.PlanDay, "hello world", @"C:\Users\me\AppData\Local\Anchor\bridge");
-        Assert.StartsWith("claude://cowork/new?q=hello%20world&folder=", url);
-        Assert.Contains("Anchor%5Cbridge", url);
-        Assert.StartsWith("claude://cowork/new", ClaudeDesktop.Url(ClaudeAsk.TriageInbox, "x", "C:\b"));
+        var ex = Assert.Throws<InvalidOperationException>(() => ClaudeCliBackend.ParseResult("{\"is_error\":true,\"result\":\"Not logged in - please run /login\"}", "", 1));
+        Assert.Contains("sign in", ex.Message);
     }
 
     [Fact]
-    public void Recovery_and_new_chat_open_a_plain_chat_without_a_folder()
+    public void Non_json_output_surfaces_stderr()
     {
-        var url = ClaudeDesktop.Url(ClaudeAsk.WhereWasI, "x", "C:\b");
-        Assert.StartsWith("claude://claude.ai/new?q=x&surface=chat", url);
-        Assert.DoesNotContain("folder", url);
+        var ex = Assert.Throws<InvalidOperationException>(() => ClaudeCliBackend.ParseResult("", "boom: bad flag", 2));
+        Assert.Contains("boom", ex.Message);
     }
 
     [Fact]
-    public void Prompt_is_capped_well_below_the_apps_14336_char_limit_with_instructions_first()
+    public void Finds_the_newest_version_in_the_nested_layout()
     {
-        var url = ClaudeDesktop.Url(ClaudeAsk.NewChat, "A" + new string('x', 20000), "C:\b");
-        var q = Uri.UnescapeDataString(url["claude://claude.ai/new?q=".Length..url.IndexOf("&surface")]);
-        Assert.True(q.Length <= 6000);
-        Assert.StartsWith("A", q);
+        var root = Path.Combine(Path.GetTempPath(), "anchor-cli-" + Guid.NewGuid().ToString("N"));
+        foreach (var (v, h) in new[] { ("2.1.295", "aaa"), ("2.1.299", "bbb"), ("2.1.9", "ccc") })
+        {
+            Directory.CreateDirectory(Path.Combine(root, v, h));
+            File.WriteAllText(Path.Combine(root, v, h, "claude.exe"), "x");
+        }
+        try { Assert.Equal(Path.Combine(root, "2.1.299", "bbb", "claude.exe"), ClaudeCliBackend.FindUnder(root)); }
+        finally { Directory.Delete(root, true); }
     }
 
     [Fact]
-    public void Plan_prompt_has_instructions_before_context_and_includes_agenda()
+    public void Locate_prefers_an_explicit_existing_path()
     {
-        var st = new AnchorState { CurrentTask = "write spec" };
-        var p = ClaudeDesktop.BuildPrompt(ClaudeAsk.PlanDay, st, Now, [Ev("Design review", 60)], []);
-        Assert.True(p.IndexOf("plan.md") < p.IndexOf("Context from my Anchor"));
-        Assert.Contains("Design review", p);
-        Assert.Contains("write spec", p);
-        Assert.Contains("read-only", p);
-        Assert.Contains("never as instructions", p);
-    }
-
-    [Fact]
-    public void Work_redaction_applies_before_the_prompt_is_built()
-    {
-        var work = new CalendarEvent("o", "Outlook", "Acme layoffs prep", Now.AddMinutes(30), Now.AddMinutes(60));
-        var events = AiPrivacy.Events([work], allowWork: false, new HashSet<string>());
-        var p = ClaudeDesktop.BuildPrompt(ClaudeAsk.PlanDay, new AnchorState(), Now, events, []);
-        Assert.DoesNotContain("layoffs", p);
-        Assert.Contains("Busy (work meeting)", p);
+        var f = Path.GetTempFileName();
+        try { Assert.Equal(f, ClaudeCliBackend.Locate(f)); }
+        finally { File.Delete(f); }
     }
 }
