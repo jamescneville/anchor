@@ -24,7 +24,7 @@ public sealed class BriefWindow : Window
         var today = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start.LocalDateTime.Date == DateTime.Today && e.Start > now).OrderBy(e => e.Start).ToList();
         var open = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).ToList();
         var facts = morning
-            ? $"{today.Count} meeting{(today.Count == 1 ? "" : "s")} still to come today" + (today.Count > 0 ? $", first at {today[0].Start.LocalDateTime:HH:mm} ({today[0].Title})" : "") + $". {open.Count} open follow-up{(open.Count == 1 ? "" : "s")}."
+            ? $"{today.Count} meeting{(today.Count == 1 ? "" : "s")} still to come today" + (today.Count > 0 ? $", first at {Fmt.Time(today[0].Start.LocalDateTime)} ({today[0].Title})" : "") + $". {open.Count} open follow-up{(open.Count == 1 ? "" : "s")}."
             : $"{open.Count} open follow-up{(open.Count == 1 ? "" : "s")}" + (open.Count > 0 ? ": " + string.Join("; ", open.Take(4).Select(t => t.Title)) : "") + ".";
 
         var ai = new TextBlock { Text = "Thinking…", Foreground = (Brush)Application.Current.Resources["Accent"], FontSize = 14.5, LineHeight = 22, Margin = new Thickness(0, 14, 0, 18) };

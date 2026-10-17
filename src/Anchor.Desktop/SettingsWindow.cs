@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Anchor.Core;
+using Anchor.Core.AI;
 
 namespace Anchor.Desktop;
 
@@ -31,14 +32,15 @@ public sealed class SettingsWindow : Window
         Field("Extra lead for in-person", "Minutes; 0 turns it off", _s.InPersonLeadMinutes.ToString(), v => _s.InPersonLeadMinutes = ParseInt(v, _s.InPersonLeadMinutes), 90);
         Field("Snooze", "Minutes", _s.SnoozeMinutes.ToString(), v => _s.SnoozeMinutes = Math.Max(1, ParseInt(v, _s.SnoozeMinutes)), 90);
         Field("Focus check-in", "Every N minutes during work hours; 0 turns it off", _s.CheckInMinutes.ToString(), v => _s.CheckInMinutes = ParseInt(v, _s.CheckInMinutes), 90);
-        Field("Workday starts", "HH:mm", _s.WorkdayStart, v => _s.WorkdayStart = v.Trim(), 90);
-        Field("Workday ends", "HH:mm", _s.WorkdayEnd, v => _s.WorkdayEnd = v.Trim(), 90);
+        Field("Workday starts", "e.g. 8:30 AM or 08:30", _s.WorkdayStart, v => _s.WorkdayStart = v.Trim(), 90);
+        Field("Workday ends", "e.g. 5:30 PM or 17:30", _s.WorkdayEnd, v => _s.WorkdayEnd = v.Trim(), 90);
         Field("“Where was I?” hotkey", "e.g. Ctrl+Space, Ctrl+Shift+W, Win+Shift+A", _s.Hotkey, v => _s.Hotkey = v.Trim(), 200);
+        Toggle("24-hour clock", "Off shows times like 2:30 PM.", _s.Use24HourClock, v => _s.Use24HourClock = v);
         Toggle("Speak alerts aloud", null, _s.SpeakAlerts, v => _s.SpeakAlerts = v);
         Toggle("Morning plan and end-of-day wrap-up", "A short brief at workday start, and a wrap-up 30 minutes before it ends.", _s.BriefsEnabled, v => _s.BriefsEnabled = v);
 
         Section("Claude", _engine.HasAnthropicKey ? "A key is saved. Leave the box empty to keep it." : "Add an API key to turn on AI triage and day plans.");
-        Secret("Anthropic API key", "Stored encrypted for your Windows user. Never written to settings.json.", "", v => { if (v.Length > 0) _engine.SaveAnthropicKey(v); });
+        KeyRow();
         Toggle("Enable AI", null, _s.Ai.Enabled, v => _s.Ai.Enabled = v);
         Toggle("Allow work items to be sent to Claude", "Outlook, Teams and Slack content. Leave off until you have approval to send work data to Anthropic.", _s.Ai.SendWorkContentToClaude, v => _s.Ai.SendWorkContentToClaude = v);
         Field("Monthly budget", "USD", _s.Ai.MonthlyBudgetUsd.ToString(), v => _s.Ai.MonthlyBudgetUsd = ParseDouble(v, _s.Ai.MonthlyBudgetUsd), 90);
@@ -164,6 +166,26 @@ public sealed class SettingsWindow : Window
         var box = new PasswordBox { Password = value, Width = 300 };
         _section.Children.Add(Row(label, hint, box));
         _apply.Add(() => set(box.Password));
+    }
+
+    void KeyRow()
+    {
+        var box = new PasswordBox { Width = 230 };
+        var test = Ui.Secondary("Test");
+        test.Margin = new Thickness(8, 0, 0, 0);
+        var result = new TextBlock { FontSize = 12, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, MaxWidth = 300, TextAlignment = TextAlignment.Right };
+        test.Click += async (_, _) =>
+        {
+            var key = box.Password.Length > 0 ? box.Password : _engine.CurrentAnthropicKey();
+            if (string.IsNullOrWhiteSpace(key)) { result.Foreground = Ui.B("Warn"); result.Text = "Paste a key first."; return; }
+            test.IsEnabled = false; result.Foreground = Ui.B("Dim"); result.Text = "Testing…";
+            var (ok, msg) = await ClaudeService.TestKeyAsync(key.Trim(), _s.Ai.FastModel, CancellationToken.None);
+            result.Foreground = Ui.B(ok ? "Ok" : "Alarm"); result.Text = msg; test.IsEnabled = true;
+        };
+        var line = new StackPanel { Orientation = Orientation.Horizontal, Children = { box, test } };
+        var holder = new StackPanel { Children = { line, result } };
+        _section.Children.Add(Row("Anthropic API key", "Stored encrypted for your Windows user. Never written to settings.json.", holder));
+        _apply.Add(() => { if (box.Password.Length > 0) _engine.SaveAnthropicKey(box.Password.Trim()); });
     }
 
     void Toggle(string label, string? hint, bool value, Action<bool> set)

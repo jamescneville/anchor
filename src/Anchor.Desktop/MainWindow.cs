@@ -30,8 +30,14 @@ public sealed class MainWindow : Window
         Title = "Anchor";
         Width = 1080; Height = 800; MinWidth = 820; MinHeight = 600;
         Ui.Style(this);
+        // Our own header acts as the title bar; Windows still draws the minimise/maximise/close buttons.
+        System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome
+        {
+            CaptionHeight = 68, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0, 0, 0, 1),
+            UseAeroCaptionButtons = false, CornerRadius = new CornerRadius(0),
+        });
 
-        var root = new Grid { Margin = new Thickness(26, 20, 26, 20) };
+        var root = new Grid { Margin = new Thickness(26, 0, 26, 20) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -39,10 +45,13 @@ public sealed class MainWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         // Header: title + source chips on the left, actions on the right
-        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 16), LastChildFill = false };
-        var titleBox = new StackPanel { Margin = new Thickness(0, 0, 22, 0) };
-        titleBox.Children.Add(new TextBlock { Text = "Anchor", FontSize = 22, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
-        titleBox.Children.Add(_date);
+        var header = new DockPanel { Height = 68, Margin = new Thickness(0, 0, 138, 8), LastChildFill = false };
+        var titleText = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        titleText.Children.Add(new TextBlock { Text = "Anchor", FontSize = 20, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
+        titleText.Children.Add(_date);
+        var logo = new Image { Source = Ui.AppIcon, Width = 34, Height = 34, VerticalAlignment = VerticalAlignment.Center };
+        RenderOptions.SetBitmapScalingMode(logo, BitmapScalingMode.HighQuality);
+        var titleBox = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 22, 0), Children = { logo, titleText } };
         DockPanel.SetDock(titleBox, Dock.Left);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         var where = Ui.Primary("Where was I?");
@@ -55,6 +64,8 @@ public sealed class MainWindow : Window
         settings.Margin = new Thickness(0);
         actions.Children.Add(where); actions.Children.Add(refresh); actions.Children.Add(settings);
         DockPanel.SetDock(actions, Dock.Right);
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(actions, true);
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(_chips, true);
         header.Children.Add(titleBox);
         header.Children.Add(actions);
         header.Children.Add(_chips);
@@ -101,7 +112,9 @@ public sealed class MainWindow : Window
 
         Grid.SetRow(_problems, 4);
         root.Children.Add(_problems);
-        Content = root;
+        Content = new Grid { Children = { root, Ui.CaptionButtons(this) } };
+        StateChanged += (_, _) => root.Margin = WindowState == WindowState.Maximized
+            ? new Thickness(34, 8, 34, 28) : new Thickness(26, 0, 26, 20); // WindowChrome overhangs 8px when maximised
 
         _engine.Changed += () => Dispatcher.BeginInvoke(Render);
         _clock.Tick += (_, _) => RenderNow();
@@ -126,7 +139,7 @@ public sealed class MainWindow : Window
     {
         var st = _engine.Store.State;
         var now = DateTimeOffset.Now;
-        _date.Text = now.LocalDateTime.ToString("dddd, d MMMM") + (st.EventsRefreshed is { } r ? $"  ·  synced {r.LocalDateTime:HH:mm}" : "  ·  not synced yet");
+        _date.Text = now.LocalDateTime.ToString("dddd, d MMMM") + (st.EventsRefreshed is { } r ? $"  ·  synced {Fmt.Time(r.LocalDateTime)}" : "  ·  not synced yet");
 
         var hasTask = st.CurrentTask.Length > 0;
         _now.Text = hasTask ? st.CurrentTask : "Nothing picked";
@@ -134,8 +147,8 @@ public sealed class MainWindow : Window
 
         var live = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
         _inProgress.Text = live is null
-            ? (hasTask ? $"since {st.CurrentTaskSince?.LocalDateTime:HH:mm}" : $"Press {_engine.Settings.Hotkey} and choose one thing.")
-            : $"In progress: {live.Title} · ends {live.End.LocalDateTime:HH:mm}";
+            ? (hasTask ? $"since {Fmt.Time(st.CurrentTaskSince?.LocalDateTime)}" : $"Press {_engine.Settings.Hotkey} and choose one thing.")
+            : $"In progress: {live.Title} · ends {Fmt.Time(live.End.LocalDateTime)}";
 
         var next = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
         if (next is null)
@@ -146,7 +159,7 @@ public sealed class MainWindow : Window
         else
         {
             var mins = (next.Start - now).TotalMinutes;
-            _next.Text = $"Next: {next.Title} · {AlertScheduler.Describe(next, now)} ({next.Start.LocalDateTime:HH:mm})";
+            _next.Text = $"Next: {next.Title} · {AlertScheduler.Describe(next, now)} ({Fmt.Time(next.Start.LocalDateTime)})";
             _next.Foreground = Ui.B(mins <= 5 ? "Alarm" : mins <= 15 ? "Warn" : "Accent");
         }
     }
@@ -221,10 +234,10 @@ public sealed class MainWindow : Window
             }
             var live = e.Start <= now && !e.IsAllDay;
             var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(82) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var time = new TextBlock { Text = e.IsAllDay ? "all day" : e.Start.LocalDateTime.ToString("HH:mm"), Foreground = Ui.B("Dim"), VerticalAlignment = VerticalAlignment.Center };
+            var time = new TextBlock { Text = e.IsAllDay ? "all day" : Fmt.Time(e.Start), Foreground = Ui.B("Dim"), VerticalAlignment = VerticalAlignment.Center };
             var title = new TextBlock { Text = e.Title, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
             row.Children.Add(time);
             Grid.SetColumn(title, 1); row.Children.Add(title);
@@ -234,7 +247,7 @@ public sealed class MainWindow : Window
                 var c = Ui.Chip($"in {Math.Ceiling((e.Start - now).TotalMinutes):0}m", (e.Start - now).TotalMinutes <= 5 ? "alarm" : "warn");
                 c.Margin = new Thickness(8, 0, 0, 0); Grid.SetColumn(c, 2); row.Children.Add(c);
             }
-            row.ToolTip = $"{e.Start.LocalDateTime:HH:mm}–{e.End.LocalDateTime:HH:mm} · {e.Source}" + (e.Location is { Length: > 0 } l ? $" · {l}" : "");
+            row.ToolTip = $"{Fmt.Time(e.Start.LocalDateTime)}–{Fmt.Time(e.End.LocalDateTime)} · {e.Source}" + (e.Location is { Length: > 0 } l ? $" · {l}" : "");
             _agenda.Children.Add(row);
         }
     }
@@ -283,7 +296,7 @@ public sealed class MainWindow : Window
     {
         var row = new StackPanel();
         row.Children.Add(new TextBlock { Text = t.Title, FontWeight = FontWeights.SemiBold, FontSize = 14 });
-        var meta = $"{t.Source} · {Clean(t.From)}{(t.Due is { } d ? $" · due {d.LocalDateTime:ddd HH:mm}" : "")}";
+        var meta = $"{t.Source} · {Clean(t.From)}{(t.Due is { } d ? $" · due {Fmt.DayTime(d.LocalDateTime)}" : "")}";
         row.Children.Add(new TextBlock { Text = meta, FontSize = 12, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
 
         var btns = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(-9, 8, 0, -4) };

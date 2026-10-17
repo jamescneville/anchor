@@ -207,3 +207,19 @@ public class InPersonAndSettingsTests
         Assert.Equal("Work", Assert.Single(back.IcsFeeds).Name);
     }
 }
+
+public class FmtTests
+{
+    [Fact]
+    public void Formats_12_and_24_hour_clocks()
+    {
+        var t = new DateTime(2026, 10, 19, 14, 5, 0);
+        try
+        {
+            Fmt.Use24Hour = false; Assert.Equal("2:05 PM", Fmt.Time(t)); Assert.Equal("Mon 2:05 PM", Fmt.DayTime(t));
+            Fmt.Use24Hour = true; Assert.Equal("14:05", Fmt.Time(t)); Assert.Equal("Mon 14:05", Fmt.DayTime(t));
+            Assert.Equal("", Fmt.Time((DateTime?)null));
+        }
+        finally { Fmt.Use24Hour = false; }
+    }
+}

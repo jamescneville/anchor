@@ -62,6 +62,23 @@ public sealed class ClaudeService(AnthropicClient client, AiSettings s, BudgetTr
         return string.Concat(response.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text));
     }
 
+    /// <summary>One-token round trip to prove a key and model work. Costs a fraction of a cent.</summary>
+    public static async Task<(bool Ok, string Message)> TestKeyAsync(string apiKey, string model, CancellationToken ct)
+    {
+        try
+        {
+            var client = new AnthropicClient { ApiKey = apiKey };
+            var r = await client.Messages.Create(new MessageCreateParams
+            {
+                Model = model, MaxTokens = 16, Thinking = new ThinkingConfigDisabled(),
+                Messages = [new() { Role = Role.User, Content = "Reply with the single word: ready" }],
+            }, ct);
+            var text = string.Concat(r.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text)).Trim();
+            return (true, $"Key works ({model} replied \"{text}\").");
+        }
+        catch (Exception ex) { return (false, ex.Message.Length > 200 ? ex.Message[..200] + "…" : ex.Message); }
+    }
+
     /// <summary>Cheap batch triage: which of these messages need something from the user?</summary>
     public async Task<IReadOnlyList<Classified>> ClassifyAsync(IReadOnlyList<InboxItem> items, CancellationToken ct)
     {
@@ -117,12 +134,12 @@ public sealed class ClaudeService(AnthropicClient client, AiSettings s, BudgetTr
     {
         var now = DateTimeOffset.Now;
         var sb = new StringBuilder();
-        sb.AppendLine($"Now: {now:dddd d MMM HH:mm}");
+        sb.AppendLine($"Now: {now:dddd d MMM} {Fmt.Time(now)}");
         sb.AppendLine("Calendar (next 36h):");
         foreach (var e in events.Where(e => !e.Cancelled).OrderBy(e => e.Start))
-            sb.AppendLine($"- {e.Start.LocalDateTime:ddd HH:mm}-{e.End.LocalDateTime:HH:mm} {(e.IsAllDay ? "(all day) " : "")}{Trim(e.Title, 80)} [{e.Source}]");
+            sb.AppendLine($"- {Fmt.DayTime(e.Start.LocalDateTime)}-{Fmt.Time(e.End.LocalDateTime)} {(e.IsAllDay ? "(all day) " : "")}{Trim(e.Title, 80)} [{e.Source}]");
         sb.AppendLine("Open follow-ups:");
-        foreach (var t in tasks) sb.AppendLine($"- {Trim(t.Title, 100)} ({t.Source}{(t.Due is { } d ? $", due {d.LocalDateTime:ddd HH:mm}" : "")})");
+        foreach (var t in tasks) sb.AppendLine($"- {Trim(t.Title, 100)} ({t.Source}{(t.Due is { } d ? $", due {Fmt.DayTime(d.LocalDateTime)}" : "")})");
         if (currentTask.Length > 0) sb.AppendLine($"Currently working on: {currentTask}");
 
         var system = eveningSweep
@@ -133,17 +150,17 @@ public sealed class ClaudeService(AnthropicClient client, AiSettings s, BudgetTr
                      "(and a one-line heads-up for tomorrow if something early is coming). Format: " +
                      "1) 'Next up' - the single next thing and when. 2) Top 3 priorities. 3) A short time-blocked schedule that respects " +
                      "meetings, with buffers and breaks. 4) 'Might slip' - things at risk. Keep it under 180 words, plain text, no preamble. " +
-                     "Do not invent meetings or tasks. " + UntrustedNote;
+                     "Do not invent meetings or tasks. Write clock times in the same format they are given. " + UntrustedNote;
         return (await AskAsync(s.PlanModel, system, sb.ToString(), 1200, fast: false, ct)).Trim();
     }
 
     public async Task<string> RecoverAsync(string currentTask, string checkpoint, CalendarEvent? next, IEnumerable<SuggestedTask> tasks, CancellationToken ct)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Now: {DateTimeOffset.Now:HH:mm}");
+        sb.AppendLine($"Now: {Fmt.Time(DateTimeOffset.Now)}");
         sb.AppendLine($"Was working on: {(currentTask.Length > 0 ? currentTask : "(not set)")}");
         sb.AppendLine($"Last checkpoint note: {(checkpoint.Length > 0 ? checkpoint : "(none)")}");
-        sb.AppendLine($"Next meeting: {(next is null ? "none" : $"{Trim(next.Title, 80)} at {next.Start.LocalDateTime:HH:mm}")}");
+        sb.AppendLine($"Next meeting: {(next is null ? "none" : $"{Trim(next.Title, 80)} at {Fmt.Time(next.Start.LocalDateTime)}")}");
         foreach (var t in tasks.Take(5)) sb.AppendLine($"Open: {Trim(t.Title, 100)}");
 
         var system = "The user got distracted and pressed 'Where was I?'. Reply in at most 3 short lines: what they were doing, what is next on the clock, " +

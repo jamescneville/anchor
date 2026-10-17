@@ -44,6 +44,7 @@ public partial class App : Application
         };
 
         var settings = AnchorSettings.Load();
+        Fmt.Use24Hour = settings.Use24HourClock;
         _engine = new AssistantEngine(settings, new StateStore());
         _main = new MainWindow(_engine);
 
@@ -117,7 +118,7 @@ public partial class App : Application
 
         _tray = new System.Windows.Forms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Information,
+            Icon = new System.Drawing.Icon(GetResourceStream(Ui.IconUri)!.Stream),
             Text = "Anchor",
             Visible = true,
             ContextMenuStrip = menu,

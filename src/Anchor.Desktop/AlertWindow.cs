@@ -60,7 +60,7 @@ public sealed class AlertWindow : Window
         stack.Children.Add(_when);
         stack.Children.Add(new TextBlock
         {
-            Text = $"{e.Start.LocalDateTime:HH:mm}–{e.End.LocalDateTime:HH:mm}  ·  {e.Source}" + (e.Location is { Length: > 0 } l && !l.StartsWith("http") ? $"  ·  {l}" : ""),
+            Text = $"{Fmt.Time(e.Start.LocalDateTime)}–{Fmt.Time(e.End.LocalDateTime)}  ·  {e.Source}" + (e.Location is { Length: > 0 } l && !l.StartsWith("http") ? $"  ·  {l}" : ""),
             Foreground = Ui.B("Dim"), Margin = new Thickness(0, 8, 0, big ? 24 : 14),
         });
 

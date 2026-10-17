@@ -84,6 +84,8 @@ public sealed class AnchorSettings
     public int SnoozeMinutes { get; set; } = 2;
     public int CheckInMinutes { get; set; } = 30;
     public bool SpeakAlerts { get; set; } = true;
+    /// <summary>false = 2:30 PM, true = 14:30.</summary>
+    public bool Use24HourClock { get; set; }
     /// <summary>Extra early alert (minutes) for in-person meetings with a physical location, to leave time to travel.</summary>
     public int InPersonLeadMinutes { get; set; } = 30;
     /// <summary>Morning plan at workday start and a wrap-up sweep 30 min before it ends (weekdays).</summary>

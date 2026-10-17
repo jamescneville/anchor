@@ -13,6 +13,10 @@ public static class Ui
     [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins m);
     [StructLayout(LayoutKind.Sequential)] struct Margins { public int L, R, T, B; }
 
+    public static readonly Uri IconUri = new("pack://application:,,,/Assets/anchor.ico");
+    static System.Windows.Media.Imaging.BitmapFrame? _icon;
+    public static System.Windows.Media.Imaging.BitmapFrame AppIcon => _icon ??= System.Windows.Media.Imaging.BitmapFrame.Create(IconUri);
+
     public static Brush B(string key) => (Brush)Application.Current.Resources[key];
 
     /// <summary>Dark title bar, rounded corners and a Mica backdrop (Windows 11 22621+); harmless no-op elsewhere.</summary>
@@ -33,6 +37,26 @@ public static class Ui
             w.Background = new SolidColorBrush(Color.FromArgb(0xC8, 0x0E, 0x10, 0x14));
         };
         w.Background = B("Bg");
+        w.Icon = AppIcon;
+    }
+
+    /// <summary>Minimise / maximise / close buttons for windows that draw their own title bar.</summary>
+    public static StackPanel CaptionButtons(Window w)
+    {
+        Button Make(string glyph, string style, Action act)
+        {
+            var b = new Button { Content = glyph, Style = (Style)Application.Current.Resources[style], Margin = new Thickness(0) };
+            System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(b, true);
+            b.Click += (_, _) => act();
+            return b;
+        }
+        var min = Make("\uE921", "CaptionBtn", () => w.WindowState = WindowState.Minimized);
+        var max = Make("\uE922", "CaptionBtn", () => w.WindowState = w.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized);
+        var close = Make("\uE8BB", "CaptionClose", w.Close);
+        w.StateChanged += (_, _) => max.Content = w.WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
+        panel.Children.Add(min); panel.Children.Add(max); panel.Children.Add(close);
+        return panel;
     }
 
     public static Border Card(UIElement child, double pad = 18) => new()

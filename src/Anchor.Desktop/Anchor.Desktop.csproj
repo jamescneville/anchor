@@ -1,7 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Anchor.Core\Anchor.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\anchor.ico" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,7 +24,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon></ApplicationIcon>
+    <ApplicationIcon>Assets\anchor.ico</ApplicationIcon>
     <AssemblyName>Anchor</AssemblyName>
   </PropertyGroup>
 

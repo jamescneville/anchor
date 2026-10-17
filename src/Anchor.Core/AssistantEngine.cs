@@ -54,6 +54,9 @@ public sealed class AssistantEngine : IDisposable
         else Tokens.Set(AnthropicKeyName, new TokenSet { AccessToken = key.Trim(), ExpiresAt = DateTimeOffset.MaxValue });
     }
 
+    public string? CurrentAnthropicKey() =>
+        Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") is { Length: > 0 } e ? e : Tokens.Get(AnthropicKeyName)?.AccessToken;
+
     public bool HasAnthropicKey => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")) || Tokens.Get(AnthropicKeyName) is not null;
 
     void BuildAi()
@@ -390,12 +393,12 @@ public sealed class AssistantEngine : IDisposable
         var lines = new List<string>
         {
             st.CurrentTask.Length > 0
-                ? $"You were working on: {st.CurrentTask}" + (st.CurrentTaskSince is { } since ? $" (since {since.LocalDateTime:HH:mm})" : "")
+                ? $"You were working on: {st.CurrentTask}" + (st.CurrentTaskSince is { } since ? $" (since {Fmt.Time(since.LocalDateTime)})" : "")
                 : "No current task set. Pick one thing and type it below.",
         };
-        if (st.Checkpoint.Length > 0) lines.Add($"Last note ({st.CheckpointAt?.LocalDateTime:HH:mm}): {st.Checkpoint}");
-        if (live is not null) lines.Add($"In progress: {live.Title} (ends {live.End.LocalDateTime:HH:mm}).");
-        lines.Add(next is null ? "No more meetings on the calendar." : $"Next: {next.Title} {AlertScheduler.Describe(next, now)} ({next.Start.LocalDateTime:HH:mm}).");
+        if (st.Checkpoint.Length > 0) lines.Add($"Last note ({Fmt.Time(st.CheckpointAt?.LocalDateTime)}): {st.Checkpoint}");
+        if (live is not null) lines.Add($"In progress: {live.Title} (ends {Fmt.Time(live.End.LocalDateTime)}).");
+        lines.Add(next is null ? "No more meetings on the calendar." : $"Next: {next.Title} {AlertScheduler.Describe(next, now)} ({Fmt.Time(next.Start.LocalDateTime)}).");
         var overdue = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted && t.Due is { } d && d < now).ToList();
         if (overdue.Count > 0) lines.Add($"Overdue: {string.Join("; ", overdue.Take(3).Select(t => t.Title))}");
         var top = st.Tasks.Where(t => t.Status == SuggestionStatus.Accepted || t.Status == SuggestionStatus.Pending).OrderByDescending(t => t.Confidence).FirstOrDefault();
