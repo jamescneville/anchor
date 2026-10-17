@@ -72,7 +72,7 @@ public sealed class SettingsWindow : Window
         Toggle("Enable Slack", null, _s.Slack.Enabled, v => _s.Slack.Enabled = v);
         Secret("User token", "xoxp-… with the search:read scope", _s.Slack.UserToken, v => _s.Slack.UserToken = v.Trim());
 
-        Section("Calendars", "Choose what shows in Anchor and whether each calendar counts as Personal or Work. Skylight's events arrive through your Google calendars.");
+        Section("Calendars", "Full: alerts, Next up and AI planning. View only: shown for reference, ignored by everything else (good for a partner's shifts or sports). Hidden: not shown. Skylight's events arrive through your Google calendars.");
         var sources = KnownSources();
         if (sources.Count == 0) _section.Children.Add(Ui.Dim("Connect Google or Outlook (or wait for the first sync) and your calendars appear here."));
         foreach (var k in sources) CalendarRow(k);
@@ -219,17 +219,28 @@ public sealed class SettingsWindow : Window
             Width = 11, Height = 11, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
             Fill = (Brush)new BrushConverter().ConvertFromString(!string.IsNullOrWhiteSpace(k.Color) ? k.Color : group == CalGroup.Work ? CalendarPrefs.WorkColor : CalendarPrefs.PersonalColor)!,
         };
-        var show = new CheckBox { IsChecked = pref?.Enabled ?? true, Content = "", Margin = new Thickness(0, 0, 14, 0), ToolTip = "Show this calendar" };
+        var useGroup = Guid.NewGuid().ToString("N");
+        var mode = CalendarPrefs.ModeOf(_s, k.Source);
+        RadioButton Use(string text, CalMode m, string tip) => new()
+        {
+            Content = text, GroupName = useGroup, Style = (Style)Application.Current.Resources["Segment"], IsChecked = mode == m, ToolTip = tip,
+            Padding = new Thickness(9, 5, 9, 5), FontSize = 12,
+        };
+        var full = Use("Full", CalMode.Full, "Alerts, \"Next up\" and AI planning");
+        var viewOnly = Use("View only", CalMode.ViewOnly, "Shown in the agenda, but no alerts, not in \"Next up\", and never given to AI");
+        var hidden = Use("Hidden", CalMode.Hidden, "Not shown anywhere");
+        var useSeg = new Border { Background = Ui.B("Field"), CornerRadius = new CornerRadius(8), Padding = new Thickness(2), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), Margin = new Thickness(0, 0, 10, 0), Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { full, viewOnly, hidden } } };
         var radios = Guid.NewGuid().ToString("N");
-        var personal = new RadioButton { Content = "Personal", GroupName = radios, Style = (Style)Application.Current.Resources["Segment"], IsChecked = group == CalGroup.Personal, Padding = new Thickness(10, 5, 10, 5), FontSize = 12 };
-        var work = new RadioButton { Content = "Work", GroupName = radios, Style = (Style)Application.Current.Resources["Segment"], IsChecked = group == CalGroup.Work, Padding = new Thickness(10, 5, 10, 5), FontSize = 12 };
+        var personal = new RadioButton { Content = "Personal", GroupName = radios, Style = (Style)Application.Current.Resources["Segment"], IsChecked = group == CalGroup.Personal, Padding = new Thickness(9, 5, 9, 5), FontSize = 12 };
+        var work = new RadioButton { Content = "Work", GroupName = radios, Style = (Style)Application.Current.Resources["Segment"], IsChecked = group == CalGroup.Work, Padding = new Thickness(9, 5, 9, 5), FontSize = 12 };
         var seg = new Border { Background = Ui.B("Field"), CornerRadius = new CornerRadius(8), Padding = new Thickness(2), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { personal, work } } };
-        var controls = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, show, seg } };
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, useSeg, seg } };
         _section.Children.Add(Row(k.Name, k.Source == k.Name ? null : k.Source, controls));
         _apply.Add(() =>
         {
             _s.Calendars.RemoveAll(p => p.Source == k.Source);
-            _s.Calendars.Add(new CalendarPref { Source = k.Source, Enabled = show.IsChecked == true, Group = work.IsChecked == true ? "Work" : "Personal" });
+            var m = hidden.IsChecked == true ? CalMode.Hidden : viewOnly.IsChecked == true ? CalMode.ViewOnly : CalMode.Full;
+            _s.Calendars.Add(new CalendarPref { Source = k.Source, Mode = m.ToString(), Enabled = m != CalMode.Hidden, Group = work.IsChecked == true ? "Work" : "Personal" });
         });
     }
 

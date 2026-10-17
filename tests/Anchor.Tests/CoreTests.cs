@@ -612,3 +612,50 @@ public class OutlookLinkTests
         Assert.Null(Bridge.SafeLink("file:///c:/x"));
     }
 }
+
+public class CalendarModeTests
+{
+    [Fact]
+    public void Unlisted_calendars_are_full()
+    {
+        var s = new AnchorSettings();
+        Assert.Equal(CalMode.Full, CalendarPrefs.ModeOf(s, "Google/Anything"));
+        Assert.True(CalendarPrefs.IsActive(s, "Google/Anything"));
+    }
+
+    [Fact]
+    public void View_only_is_shown_but_not_active()
+    {
+        var s = new AnchorSettings();
+        s.Calendars.Add(new CalendarPref { Source = "Google/Desi's Shifts", Mode = "ViewOnly" });
+        Assert.True(CalendarPrefs.IsEnabled(s, "Google/Desi's Shifts"));     // still in the agenda
+        Assert.False(CalendarPrefs.IsActive(s, "Google/Desi's Shifts"));     // but no alerts / planning
+    }
+
+    [Fact]
+    public void Hidden_is_neither_shown_nor_active()
+    {
+        var s = new AnchorSettings();
+        s.Calendars.Add(new CalendarPref { Source = "Google/F1", Mode = "Hidden" });
+        Assert.False(CalendarPrefs.IsEnabled(s, "Google/F1"));
+        Assert.False(CalendarPrefs.IsActive(s, "Google/F1"));
+    }
+
+    [Fact]
+    public void Older_settings_with_enabled_false_still_mean_hidden()
+    {
+        var s = new AnchorSettings();
+        s.Calendars.Add(new CalendarPref { Source = "Google/Old", Enabled = false });   // no Mode written
+        Assert.Equal(CalMode.Hidden, CalendarPrefs.ModeOf(s, "Google/Old"));
+    }
+
+    [Fact]
+    public void Mode_survives_a_settings_round_trip()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"anchor-settings-{Guid.NewGuid():N}.json");
+        var s = new AnchorSettings();
+        s.Calendars.Add(new CalendarPref { Source = "Google/X", Mode = "ViewOnly" });
+        s.Save(path);
+        Assert.Equal(CalMode.ViewOnly, CalendarPrefs.ModeOf(AnchorSettings.Load(path), "Google/X"));
+    }
+}

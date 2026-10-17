@@ -258,7 +258,7 @@ public sealed class AssistantEngine : IDisposable
 
     IReadOnlyList<DueAlert> EvaluateAlerts(DateTimeOffset now, IReadOnlySet<string> fired)
     {
-        var events = VisibleEvents;
+        var events = ActiveEvents;
         var offsets = _settings.AlertOffsetsMinutes;
         if (_settings.InPersonLeadMinutes <= 0) return AlertScheduler.Evaluate(events, now, fired, offsets);
 
@@ -294,7 +294,7 @@ public sealed class AssistantEngine : IDisposable
         var t = TimeOnly.FromDateTime(now.LocalDateTime);
         if (t < s || t > e) return false;
         // Don't nag right before a meeting; the meeting alerts already cover that.
-        var next = AlertScheduler.NextEvent(VisibleEvents, now);
+        var next = AlertScheduler.NextEvent(ActiveEvents, now);
         if (next is not null && next.Start - now < TimeSpan.FromMinutes(10)) return false;
         return now - _lastCheckIn >= TimeSpan.FromMinutes(_settings.CheckInMinutes);
     }
@@ -453,6 +453,11 @@ public sealed class AssistantEngine : IDisposable
     public IReadOnlyList<CalendarEvent> VisibleEvents =>
         Store.State.CachedEvents.Where(e => CalendarPrefs.IsEnabled(_settings, e.Source)).ToList();
 
+    /// <summary>The events Anchor acts on: alerts, "Next up", check-ins and AI planning. Excludes View-only and Hidden calendars.</summary>
+    public IReadOnlyList<CalendarEvent> ActiveEvents =>
+        Store.State.CachedEvents.Where(e => CalendarPrefs.IsActive(_settings, e.Source)).ToList();
+
+    public CalMode ModeOf(CalendarEvent e) => CalendarPrefs.ModeOf(_settings, e.Source);
     public CalGroup GroupOf(CalendarEvent e) => CalendarPrefs.GroupOf(_settings, e.Source);
     public string ColorOf(CalendarEvent e) => CalendarPrefs.ColorOf(_settings, e);
 
@@ -471,7 +476,7 @@ public sealed class AssistantEngine : IDisposable
         if (!Claude.Allow(background: false)) return "AI budget limit reached for this month. " + Budget.Summary;
         var now = DateTimeOffset.Now;
         var plan = await Busy(() => Claude.PlanDayAsync(
-            ForAi(VisibleEvents.Where(e => e.End > now && e.Start < now.AddHours(36))),
+            ForAi(ActiveEvents.Where(e => e.End > now && e.Start < now.AddHours(36))),
             ForAi(Store.State.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).Take(12)),
             Store.State.CurrentTask, eveningSweep, _cts.Token));
         if (!eveningSweep) Store.Mutate(s => { s.LastPlan = plan; s.LastPlanAt = DateTimeOffset.Now; });
@@ -483,7 +488,7 @@ public sealed class AssistantEngine : IDisposable
     {
         var now = DateTimeOffset.Now;
         var st = Store.State;
-        var events = VisibleEvents;
+        var events = ActiveEvents;
         var live = events.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
         var next = events.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
         var stale = FocusTracker.IsStale(st.CurrentTaskSince, now);
@@ -507,7 +512,7 @@ public sealed class AssistantEngine : IDisposable
     {
         if (Claude is null || !Claude.Allow(background: false)) return null;
         var st = Store.State;
-        var next = AlertScheduler.NextEvent(ForAi(VisibleEvents), DateTimeOffset.Now);
+        var next = AlertScheduler.NextEvent(ForAi(ActiveEvents), DateTimeOffset.Now);
         return await Busy(() => Claude.RecoverAsync(st.CurrentTask, st.Checkpoint, next,
             ForAi(st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)), _cts.Token));
     }

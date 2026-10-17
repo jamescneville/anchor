@@ -163,7 +163,7 @@ public sealed class MainWindow : Window
         _since.Text = !hasTask ? $"Press {_engine.Settings.Hotkey} and choose one thing."
             : st.CurrentTaskSince is { } since ? (stale ? $"since {Fmt.DayTime(since.LocalDateTime)}" : $"since {Fmt.Time(since)}") : "";
 
-        var events = _engine.VisibleEvents;
+        var events = _engine.ActiveEvents;
         var live = events.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
         _inProgress.Text = live is null ? "" : $"In progress: {live.Title} · ends {Fmt.Time(live.End.LocalDateTime)}";
         _inProgress.Visibility = live is null ? Visibility.Collapsed : Visibility.Visible;
@@ -420,9 +420,10 @@ public sealed class MainWindow : Window
 
     UIElement AgendaRow(CalendarEvent e, DateTimeOffset now, bool tagGroup, bool compact)
     {
-        var live = e.Start <= now && !e.IsAllDay;
+        var viewOnly = _engine.ModeOf(e) == CalMode.ViewOnly;       // shown for reference, but Anchor does not act on it
+        var live = e.Start <= now && !e.IsAllDay && !viewOnly;
         var work = _engine.GroupOf(e) == CalGroup.Work;
-        var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+        var row = new Grid { Margin = new Thickness(0, 3, 0, 3), Opacity = viewOnly ? 0.55 : 1 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 74 : 86) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -442,13 +443,13 @@ public sealed class MainWindow : Window
         var tail = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (tagGroup && work) tail.Children.Add(new TextBlock { Text = "WORK", FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Hex(CalendarPrefs.WorkColor, "#5B9DFF"), Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
         if (live) { var c = Ui.Chip("NOW", "accent"); c.Margin = new Thickness(8, 0, 0, 0); tail.Children.Add(c); }
-        else if (!e.IsAllDay && (e.Start - now).TotalMinutes <= 30)
+        else if (!e.IsAllDay && !viewOnly && (e.Start - now).TotalMinutes <= 30 && e.Start > now)
         {
             var c = Ui.Chip($"in {Math.Ceiling((e.Start - now).TotalMinutes):0}m", (e.Start - now).TotalMinutes <= 5 ? "alarm" : "warn");
             c.Margin = new Thickness(8, 0, 0, 0); tail.Children.Add(c);
         }
         Grid.SetColumn(tail, 3); row.Children.Add(tail);
-        row.ToolTip = $"{Fmt.Time(e.Start.LocalDateTime)}–{Fmt.Time(e.End.LocalDateTime)} · {e.Source}" + (e.Location is { Length: > 0 } l ? $" · {l}" : "");
+        row.ToolTip = $"{Fmt.Time(e.Start.LocalDateTime)}–{Fmt.Time(e.End.LocalDateTime)} · {e.Source}" + (e.Location is { Length: > 0 } l ? $" · {l}" : "") + (viewOnly ? " · view only: no alerts or planning" : "");
         return row;
     }
 

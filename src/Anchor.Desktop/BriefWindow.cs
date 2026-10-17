@@ -21,7 +21,7 @@ public sealed class BriefWindow : Window
 
         var st = engine.Store.State;
         var now = DateTimeOffset.Now;
-        var today = engine.VisibleEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start.LocalDateTime.Date == DateTime.Today && e.Start > now).OrderBy(e => e.Start).ToList();
+        var today = engine.ActiveEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start.LocalDateTime.Date == DateTime.Today && e.Start > now).OrderBy(e => e.Start).ToList();
         var open = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).ToList();
         var done = engine.Focus.DoneToday(now);
         var doneText = done.Count > 0 ? $"You finished {done.Count} thing{(done.Count == 1 ? "" : "s")} today: {string.Join("; ", done.Select(d => d.Title))}. " : "";
