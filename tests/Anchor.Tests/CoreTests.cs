@@ -478,3 +478,102 @@ public class UsageAndCostTests
         Assert.Null(ev[1].OpenUrl);
     }
 }
+
+public class FocusTests
+{
+    static (FocusTracker, StateStore) Make()
+    {
+        var store = new StateStore(Path.Combine(Path.GetTempPath(), $"anchor-test-{Guid.NewGuid():N}.json"));
+        return (new FocusTracker(store), store);
+    }
+    static readonly DateTimeOffset Now = new(2026, 10, 19, 14, 0, 0, TimeSpan.FromHours(-4));
+
+    [Fact]
+    public void Finishing_logs_and_clears_the_task()
+    {
+        var (f, s) = Make();
+        f.SetTask("Write spec", Now);
+        Assert.True(f.Finish(Now.AddMinutes(30)));
+        Assert.Equal("", s.State.CurrentTask);
+        Assert.Null(s.State.CurrentTaskSince);
+        Assert.Equal("Write spec", Assert.Single(f.DoneToday(Now.AddMinutes(31))).Title);
+        Assert.False(f.Finish(Now));                       // nothing left to finish
+    }
+
+    [Fact]
+    public void Clearing_does_not_count_as_done()
+    {
+        var (f, s) = Make();
+        f.SetTask("Idea", Now); f.ClearTask();
+        Assert.Empty(f.DoneToday(Now)); Assert.Equal("", s.State.CurrentTask);
+    }
+
+    [Fact]
+    public void Empty_titles_are_ignored_and_empty_notes_clear()
+    {
+        var (f, s) = Make();
+        f.SetTask("   ", Now); Assert.Equal("", s.State.CurrentTask);
+        f.SetNote("look into voxel phase", Now); Assert.Equal("look into voxel phase", s.State.Checkpoint);
+        f.SetNote("  ", Now); Assert.Equal("", s.State.Checkpoint); Assert.Null(s.State.CheckpointAt);
+    }
+
+    [Fact]
+    public void Staleness_is_a_previous_day_or_twelve_hours()
+    {
+        Assert.False(FocusTracker.IsStale(Now.AddHours(-3), Now));
+        Assert.True(FocusTracker.IsStale(Now.AddDays(-1), Now));
+        Assert.True(FocusTracker.IsStale(Now.AddHours(-13), Now.AddHours(1)));
+        Assert.False(FocusTracker.IsStale(null, Now));
+    }
+
+    [Fact]
+    public void Keeping_a_task_refreshes_its_start_time()
+    {
+        var (f, s) = Make();
+        f.SetTask("Review", Now.AddDays(-1)); f.KeepTask(Now);
+        Assert.Equal(Now, s.State.CurrentTaskSince);
+        Assert.False(FocusTracker.IsStale(s.State.CurrentTaskSince, Now));
+    }
+}
+
+public class CalendarPrefsTests
+{
+    [Fact]
+    public void Defaults_put_outlook_in_work_and_google_in_personal()
+    {
+        var feeds = new List<IcsFeed> { new() { Name = "Family", Url = "x", IsWork = false }, new() { Name = "Corp", Url = "y" } };
+        Assert.Equal(CalGroup.Work, CalendarPrefs.DefaultGroup("Claude/Outlook", feeds));
+        Assert.Equal(CalGroup.Work, CalendarPrefs.DefaultGroup("Outlook", feeds));
+        Assert.Equal(CalGroup.Personal, CalendarPrefs.DefaultGroup("Google/Skylight Family", feeds));
+        Assert.Equal(CalGroup.Personal, CalendarPrefs.DefaultGroup("ICS/Family", feeds));
+        Assert.Equal(CalGroup.Work, CalendarPrefs.DefaultGroup("ICS/Corp", feeds));
+    }
+
+    [Fact]
+    public void Overrides_win_and_hidden_calendars_are_disabled()
+    {
+        var s = new AnchorSettings();
+        s.Calendars.Add(new CalendarPref { Source = "Google/Work cal", Group = "Work" });
+        s.Calendars.Add(new CalendarPref { Source = "Google/Holidays", Enabled = false });
+        Assert.Equal(CalGroup.Work, CalendarPrefs.GroupOf(s, "Google/Work cal"));
+        Assert.False(CalendarPrefs.IsEnabled(s, "Google/Holidays"));
+        Assert.True(CalendarPrefs.IsEnabled(s, "Google/Anything else"));
+    }
+
+    [Fact]
+    public void Colour_prefers_the_calendars_own_then_the_group_default()
+    {
+        var s = new AnchorSettings();
+        var now = DateTimeOffset.Now;
+        Assert.Equal("#AABBCC", CalendarPrefs.ColorOf(s, new CalendarEvent("a", "Google/X", "t", now, now, Color: "#AABBCC")));
+        Assert.Equal(CalendarPrefs.WorkColor, CalendarPrefs.ColorOf(s, new CalendarEvent("b", "Claude/Outlook", "t", now, now)));
+        Assert.Equal(CalendarPrefs.PersonalColor, CalendarPrefs.ColorOf(s, new CalendarEvent("c", "Google/Y", "t", now, now)));
+    }
+
+    [Fact]
+    public void Google_events_carry_their_calendar_colour()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("{\"id\":\"1\",\"summary\":\"Practice\",\"start\":{\"dateTime\":\"2026-10-19T16:30:00-04:00\"},\"end\":{\"dateTime\":\"2026-10-19T17:30:00-04:00\"}}");
+        Assert.Equal("#9A9CFF", GoogleCalendarSource.Parse(doc.RootElement, "Google/Family", "#9A9CFF")!.Color);
+    }
+}

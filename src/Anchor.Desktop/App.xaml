@@ -217,10 +217,11 @@
             <Setter Property="Foreground" Value="{StaticResource Dim}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Padding" Value="16,7"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="bd" CornerRadius="6" Padding="16,7" Background="Transparent">
+                        <Border x:Name="bd" CornerRadius="6" Padding="{TemplateBinding Padding}" Background="Transparent">
                             <ContentPresenter HorizontalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>

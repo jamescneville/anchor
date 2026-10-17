@@ -122,6 +122,10 @@ public sealed class AnchorSettings
     public MicrosoftSettings Microsoft { get; set; } = new();
     public SlackSettings Slack { get; set; } = new();
     public List<IcsFeed> IcsFeeds { get; set; } = new();
+    /// <summary>Per-calendar overrides: shown/hidden and Personal vs Work. Calendars without an entry use the defaults.</summary>
+    public List<CalendarPref> Calendars { get; set; } = new();
+    /// <summary>All | Personal | Work | Split</summary>
+    public string AgendaView { get; set; } = "All";
     public AiSettings Ai { get; set; } = new();
     public ClaudeDesktopSettings ClaudeDesktop { get; set; } = new();
 

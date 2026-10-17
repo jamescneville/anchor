@@ -72,6 +72,12 @@ public sealed class SettingsWindow : Window
         Toggle("Enable Slack", null, _s.Slack.Enabled, v => _s.Slack.Enabled = v);
         Secret("User token", "xoxp-… with the search:read scope", _s.Slack.UserToken, v => _s.Slack.UserToken = v.Trim());
 
+        Section("Calendars", "Choose what shows in Anchor and whether each calendar counts as Personal or Work. Skylight's events arrive through your Google calendars.");
+        var sources = KnownSources();
+        if (sources.Count == 0) _section.Children.Add(Ui.Dim("Connect Google or Outlook (or wait for the first sync) and your calendars appear here."));
+        foreach (var k in sources) CalendarRow(k);
+        EndSection();
+
         Section("Calendar feeds (ICS)", "Read-only calendars published as a link. One per line: Name | https://… | personal (add “| personal” for non-work feeds; work feeds are redacted from AI prompts).");
         var ics = new TextBox { AcceptsReturn = true, MinHeight = 70, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12,
             Text = string.Join(Environment.NewLine, _s.IcsFeeds.Select(f => $"{f.Name} | {f.Url}" + (f.IsWork ? "" : " | personal"))) };
@@ -192,6 +198,39 @@ public sealed class SettingsWindow : Window
             result.Foreground = Ui.B(ok ? "Ok" : "Alarm"); result.Text = msg; test.IsEnabled = true;
         };
         _section.Children.Add(Row("Test Claude login", "Makes one tiny request.", new StackPanel { Children = { test, result } }));
+    }
+
+    /// <summary>Every calendar Anchor knows about: discovered on accounts, plus any source that currently has events.</summary>
+    List<KnownCalendar> KnownSources()
+    {
+        var st = _engine.Store.State;
+        var list = st.KnownCalendars.ToList();
+        foreach (var src in st.CachedEvents.Select(e => e.Source).Distinct().Where(s => list.All(k => k.Source != s)))
+            list.Add(new KnownCalendar(src, src == Bridge.EventSource ? "Outlook (work, via Claude)" : src, null));
+        return list.OrderBy(k => CalendarPrefs.GroupOf(_s, k.Source)).ThenBy(k => k.Name).ToList();
+    }
+
+    void CalendarRow(KnownCalendar k)
+    {
+        var pref = _s.Calendars.FirstOrDefault(p => p.Source == k.Source);
+        var group = CalendarPrefs.GroupOf(_s, k.Source);
+        var dot = new System.Windows.Shapes.Ellipse
+        {
+            Width = 11, Height = 11, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
+            Fill = (Brush)new BrushConverter().ConvertFromString(!string.IsNullOrWhiteSpace(k.Color) ? k.Color : group == CalGroup.Work ? CalendarPrefs.WorkColor : CalendarPrefs.PersonalColor)!,
+        };
+        var show = new CheckBox { IsChecked = pref?.Enabled ?? true, Content = "", Margin = new Thickness(0, 0, 14, 0), ToolTip = "Show this calendar" };
+        var radios = Guid.NewGuid().ToString("N");
+        var personal = new RadioButton { Content = "Personal", GroupName = radios, Style = (Style)Application.Current.Resources["Segment"], IsChecked = group == CalGroup.Personal, Padding = new Thickness(10, 5, 10, 5), FontSize = 12 };
+        var work = new RadioButton { Content = "Work", GroupName = radios, Style = (Style)Application.Current.Resources["Segment"], IsChecked = group == CalGroup.Work, Padding = new Thickness(10, 5, 10, 5), FontSize = 12 };
+        var seg = new Border { Background = Ui.B("Field"), CornerRadius = new CornerRadius(8), Padding = new Thickness(2), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { personal, work } } };
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, show, seg } };
+        _section.Children.Add(Row(k.Name, k.Source == k.Name ? null : k.Source, controls));
+        _apply.Add(() =>
+        {
+            _s.Calendars.RemoveAll(p => p.Source == k.Source);
+            _s.Calendars.Add(new CalendarPref { Source = k.Source, Enabled = show.IsChecked == true, Group = work.IsChecked == true ? "Work" : "Personal" });
+        });
     }
 
     void KeyRow()

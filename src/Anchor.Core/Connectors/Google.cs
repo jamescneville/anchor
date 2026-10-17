@@ -24,13 +24,14 @@ public static class GoogleAuth
 /// Reads every calendar the account can see (primary, shared and the family/home calendar that
 /// Skylight syncs from) so the Skylight source of truth is covered without a Skylight API.
 /// </summary>
-public sealed class GoogleCalendarSource(OAuthSession session) : ICalendarSource
+public sealed class GoogleCalendarSource(OAuthSession session, Action<IReadOnlyList<KnownCalendar>>? onCalendars = null) : ICalendarSource
 {
     public string Name => "Google";
 
     public async Task<IReadOnlyList<CalendarEvent>> GetEventsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
         var result = new List<CalendarEvent>();
+        var known = new List<KnownCalendar>();
         using var list = await session.GetJsonAsync("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader", ct);
 
         foreach (var cal in list.RootElement.GetProperty("items").EnumerateArray())
@@ -40,6 +41,8 @@ public sealed class GoogleCalendarSource(OAuthSession session) : ICalendarSource
             if (id.Contains("#holiday@") || id.Contains("#contacts@")) continue;
             var calName = cal.TryGetProperty("summaryOverride", out var so) ? so.GetString()
                         : cal.TryGetProperty("summary", out var s) ? s.GetString() : id;
+            var color = cal.TryGetProperty("backgroundColor", out var bc) ? bc.GetString() : null;
+            known.Add(new KnownCalendar($"Google/{calName}", calName ?? id, color));
 
             var url = $"https://www.googleapis.com/calendar/v3/calendars/{Uri.EscapeDataString(id)}/events" +
                       $"?singleEvents=true&orderBy=startTime&maxResults=250" +
@@ -47,14 +50,15 @@ public sealed class GoogleCalendarSource(OAuthSession session) : ICalendarSource
             using var ev = await session.GetJsonAsync(url, ct);
             foreach (var e in ev.RootElement.GetProperty("items").EnumerateArray())
             {
-                var parsed = Parse(e, $"Google/{calName}");
+                var parsed = Parse(e, $"Google/{calName}", color);
                 if (parsed is not null) result.Add(parsed);
             }
         }
+        onCalendars?.Invoke(known);
         return result;
     }
 
-    public static CalendarEvent? Parse(JsonElement e, string source)
+    public static CalendarEvent? Parse(JsonElement e, string source, string? color = null)
     {
         if (!e.TryGetProperty("start", out var st) || !e.TryGetProperty("end", out var en)) return null;
         var allDay = st.TryGetProperty("date", out _);
@@ -71,7 +75,7 @@ public sealed class GoogleCalendarSource(OAuthSession session) : ICalendarSource
             e.GetProperty("id").GetString()!, source,
             e.TryGetProperty("summary", out var sum) ? sum.GetString() ?? "(no title)" : "(no title)",
             start, end, join, location, allDay,
-            e.TryGetProperty("status", out var status) && status.GetString() == "cancelled");
+            e.TryGetProperty("status", out var status) && status.GetString() == "cancelled", null, color);
     }
 
     static readonly string[] JoinHosts = ["zoom.us", "teams.microsoft.com", "teams.live.com", "meet.google.com", "webex.com", "gotomeet"];

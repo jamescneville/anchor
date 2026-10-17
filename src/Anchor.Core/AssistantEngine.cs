@@ -27,6 +27,7 @@ public sealed class AssistantEngine : IDisposable
     readonly List<CalendarEvent> _testEvents = new();
 
     public StateStore Store { get; }
+    public FocusTracker Focus { get; }
     public TokenStore Tokens { get; } = new();
     public BudgetTracker Budget { get; }
     /// <summary>Ledger for the Claude-login (CLI) path, kept apart from API spend.</summary>
@@ -47,6 +48,7 @@ public sealed class AssistantEngine : IDisposable
     {
         _settings = settings;
         Store = store;
+        Focus = new FocusTracker(store);
         Budget = new BudgetTracker(store, settings.Ai);
         var cd = settings.ClaudeDesktop;
         CliBudget = new BudgetTracker(store, new AiSettings
@@ -109,7 +111,8 @@ public sealed class AssistantEngine : IDisposable
         if (g.Enabled && g.ClientId.Length > 0)
         {
             var s = Session(GoogleAuth.Provider(g));
-            if (g.Calendar) _calendars.Add(new GoogleCalendarSource(s));
+            if (g.Calendar) _calendars.Add(new GoogleCalendarSource(s, list => Store.Mutate(st =>
+                st.KnownCalendars = st.KnownCalendars.Where(k => !k.Source.StartsWith("Google/")).Concat(list).ToList())));
             if (g.Gmail) _messages.Add(new GmailSource(s, Seen));
         }
 
@@ -255,7 +258,7 @@ public sealed class AssistantEngine : IDisposable
 
     IReadOnlyList<DueAlert> EvaluateAlerts(DateTimeOffset now, IReadOnlySet<string> fired)
     {
-        var events = Store.State.CachedEvents;
+        var events = VisibleEvents;
         var offsets = _settings.AlertOffsetsMinutes;
         if (_settings.InPersonLeadMinutes <= 0) return AlertScheduler.Evaluate(events, now, fired, offsets);
 
@@ -291,7 +294,7 @@ public sealed class AssistantEngine : IDisposable
         var t = TimeOnly.FromDateTime(now.LocalDateTime);
         if (t < s || t > e) return false;
         // Don't nag right before a meeting; the meeting alerts already cover that.
-        var next = AlertScheduler.NextEvent(Store.State.CachedEvents, now);
+        var next = AlertScheduler.NextEvent(VisibleEvents, now);
         if (next is not null && next.Start - now < TimeSpan.FromMinutes(10)) return false;
         return now - _lastCheckIn >= TimeSpan.FromMinutes(_settings.CheckInMinutes);
     }
@@ -446,11 +449,19 @@ public sealed class AssistantEngine : IDisposable
     public void SetStatus(string id, SuggestionStatus status) =>
         Store.Mutate(s => { var t = s.Tasks.FirstOrDefault(x => x.Id == id); if (t is not null) t.Status = status; });
 
-    public void SetCurrentTask(string title) =>
-        Store.Mutate(s => { s.CurrentTask = title; s.CurrentTaskSince = DateTimeOffset.Now; });
+    /// <summary>Calendar events after the user's per-calendar show/hide choices. Everything user-facing reads this, not the raw cache.</summary>
+    public IReadOnlyList<CalendarEvent> VisibleEvents =>
+        Store.State.CachedEvents.Where(e => CalendarPrefs.IsEnabled(_settings, e.Source)).ToList();
 
-    public void SaveCheckpoint(string note) =>
-        Store.Mutate(s => { s.Checkpoint = note; s.CheckpointAt = DateTimeOffset.Now; });
+    public CalGroup GroupOf(CalendarEvent e) => CalendarPrefs.GroupOf(_settings, e.Source);
+    public string ColorOf(CalendarEvent e) => CalendarPrefs.ColorOf(_settings, e);
+
+    public void SetCurrentTask(string title) { Focus.SetTask(title, DateTimeOffset.Now); Changed?.Invoke(); }
+    public void SaveCheckpoint(string note) { Focus.SetNote(note, DateTimeOffset.Now); Changed?.Invoke(); }
+    public void FinishTask() { Focus.Finish(DateTimeOffset.Now); Changed?.Invoke(); }
+    public void ClearTask() { Focus.ClearTask(); Changed?.Invoke(); }
+    public void KeepTask() { Focus.KeepTask(DateTimeOffset.Now); Changed?.Invoke(); }
+    public void ClearNote() { Focus.ClearNote(); Changed?.Invoke(); }
 
     public void CheckInAnswered() => _lastCheckIn = DateTimeOffset.Now;
 
@@ -460,7 +471,7 @@ public sealed class AssistantEngine : IDisposable
         if (!Claude.Allow(background: false)) return "AI budget limit reached for this month. " + Budget.Summary;
         var now = DateTimeOffset.Now;
         var plan = await Busy(() => Claude.PlanDayAsync(
-            ForAi(Store.State.CachedEvents.Where(e => e.End > now && e.Start < now.AddHours(36))),
+            ForAi(VisibleEvents.Where(e => e.End > now && e.Start < now.AddHours(36))),
             ForAi(Store.State.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).Take(12)),
             Store.State.CurrentTask, eveningSweep, _cts.Token));
         if (!eveningSweep) Store.Mutate(s => { s.LastPlan = plan; s.LastPlanAt = DateTimeOffset.Now; });
@@ -472,17 +483,19 @@ public sealed class AssistantEngine : IDisposable
     {
         var now = DateTimeOffset.Now;
         var st = Store.State;
-        var live = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
-        var next = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
+        var events = VisibleEvents;
+        var live = events.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
+        var next = events.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
+        var stale = FocusTracker.IsStale(st.CurrentTaskSince, now);
         var lines = new List<string>
         {
-            st.CurrentTask.Length > 0
-                ? $"You were working on: {st.CurrentTask}" + (st.CurrentTaskSince is { } since ? $" (since {Fmt.Time(since.LocalDateTime)})" : "")
-                : "No current task set. Pick one thing and type it below.",
+            st.CurrentTask.Length == 0 ? "Nothing picked yet. Choose one thing below."
+            : stale ? $"From earlier: {st.CurrentTask}. Still on it?"
+            : $"You were working on: {st.CurrentTask}" + (st.CurrentTaskSince is { } since ? $" (since {Fmt.Time(since)})" : ""),
         };
-        if (st.Checkpoint.Length > 0) lines.Add($"Last note ({Fmt.Time(st.CheckpointAt?.LocalDateTime)}): {st.Checkpoint}");
-        if (live is not null) lines.Add($"In progress: {live.Title} (ends {Fmt.Time(live.End.LocalDateTime)}).");
-        lines.Add(next is null ? "No more meetings on the calendar." : $"Next: {next.Title} {AlertScheduler.Describe(next, now)} ({Fmt.Time(next.Start.LocalDateTime)}).");
+        if (st.Checkpoint.Length > 0) lines.Add($"Breadcrumb: {st.Checkpoint}");
+        if (live is not null) lines.Add($"In progress: {live.Title} (ends {Fmt.Time(live.End)}).");
+        lines.Add(next is null ? "No more meetings on the calendar." : $"Next: {next.Title} {AlertScheduler.Describe(next, now)} ({Fmt.Time(next.Start)}).");
         var overdue = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted && t.Due is { } d && d < now).ToList();
         if (overdue.Count > 0) lines.Add($"Overdue: {string.Join("; ", overdue.Take(3).Select(t => t.Title))}");
         var top = st.Tasks.Where(t => t.Status == SuggestionStatus.Accepted || t.Status == SuggestionStatus.Pending).OrderByDescending(t => t.Confidence).FirstOrDefault();
@@ -494,7 +507,7 @@ public sealed class AssistantEngine : IDisposable
     {
         if (Claude is null || !Claude.Allow(background: false)) return null;
         var st = Store.State;
-        var next = AlertScheduler.NextEvent(ForAi(st.CachedEvents), DateTimeOffset.Now);
+        var next = AlertScheduler.NextEvent(ForAi(VisibleEvents), DateTimeOffset.Now);
         return await Busy(() => Claude.RecoverAsync(st.CurrentTask, st.Checkpoint, next,
             ForAi(st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)), _cts.Token));
     }

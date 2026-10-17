@@ -30,6 +30,8 @@ public sealed class AnchorState
     /// <summary>Calendar events dropped into the bridge by Claude desktop (work Outlook via the Microsoft 365 connector).</summary>
     public List<CalendarEvent> BridgeEvents { get; set; } = new();
     public ClaudeUsage? AccountUsage { get; set; }
+    public List<DoneItem> Done { get; set; } = new();
+    public List<KnownCalendar> KnownCalendars { get; set; } = new();
     public DateTimeOffset? BridgeEventsAt { get; set; }
 
     public string? LastPlan { get; set; }
@@ -85,6 +87,7 @@ public sealed class StateStore
             State.SnoozedUntil.Remove(k);
         if (State.SeenItemIds.Count > 2000)
             State.SeenItemIds = State.SeenItemIds.TakeLast(1000).ToHashSet();
+        State.Done.RemoveAll(d => d.At < DateTimeOffset.Now.AddDays(-7));
         State.Tasks.RemoveAll(t => t.Status is SuggestionStatus.Dismissed or SuggestionStatus.Done && t.Created < DateTimeOffset.Now.AddDays(-14));
         foreach (var k in State.SpendByDay.Keys.Where(k => string.CompareOrdinal(k, DateTime.Now.AddDays(-62).ToString("yyyy-MM-dd")) < 0).ToList())
             State.SpendByDay.Remove(k);

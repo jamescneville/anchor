@@ -21,11 +21,13 @@ public sealed class BriefWindow : Window
 
         var st = engine.Store.State;
         var now = DateTimeOffset.Now;
-        var today = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start.LocalDateTime.Date == DateTime.Today && e.Start > now).OrderBy(e => e.Start).ToList();
+        var today = engine.VisibleEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start.LocalDateTime.Date == DateTime.Today && e.Start > now).OrderBy(e => e.Start).ToList();
         var open = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).ToList();
+        var done = engine.Focus.DoneToday(now);
+        var doneText = done.Count > 0 ? $"You finished {done.Count} thing{(done.Count == 1 ? "" : "s")} today: {string.Join("; ", done.Select(d => d.Title))}. " : "";
         var facts = morning
             ? $"{today.Count} meeting{(today.Count == 1 ? "" : "s")} still to come today" + (today.Count > 0 ? $", first at {Fmt.Time(today[0].Start.LocalDateTime)} ({today[0].Title})" : "") + $". {open.Count} open follow-up{(open.Count == 1 ? "" : "s")}."
-            : $"{open.Count} open follow-up{(open.Count == 1 ? "" : "s")}" + (open.Count > 0 ? ": " + string.Join("; ", open.Take(4).Select(t => t.Title)) : "") + ".";
+            : doneText + $"{open.Count} open follow-up{(open.Count == 1 ? "" : "s")}" + (open.Count > 0 ? ": " + string.Join("; ", open.Take(4).Select(t => t.Title)) : "") + ".";
 
         var ai = new TextBlock { Text = "Thinking…", Foreground = (Brush)Application.Current.Resources["Accent"], FontSize = 14.5, LineHeight = 22, Margin = new Thickness(0, 14, 0, 18) };
         var ok = Ui.Primary(morning ? "Let's go" : "Done for today", 22, 10);

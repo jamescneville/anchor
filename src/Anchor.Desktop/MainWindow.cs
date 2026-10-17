@@ -14,9 +14,14 @@ public sealed class MainWindow : Window
     readonly TextBlock _date = new() { FontSize = 12, Foreground = Ui.B("Dim") };
     readonly WrapPanel _chips = new() { VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock _now = new() { FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] };
-    readonly TextBlock _inProgress = new() { FontSize = 13, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 6, 0, 0) };
+    readonly TextBlock _inProgress = new() { FontSize = 13, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 12, 0, 0) };
     readonly TextBlock _next = new() { FontSize = 15, Margin = new Thickness(0, 4, 0, 0) };
-    readonly StackPanel _agenda = new();
+    readonly Grid _agendaHost = new();
+    readonly DockPanel _heroTop = new() { Margin = new Thickness(0, 0, 0, 6) };
+    readonly TextBlock _since = new() { FontSize = 13, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 6, 0, 0) };
+    readonly StackPanel _crumb = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+    readonly WrapPanel _heroButtons = new() { Margin = new Thickness(0, 14, 0, 0) };
+    Grid? _cols;
     readonly StackPanel _tasks = new();
     readonly TextBlock _plan = new() { FontSize = 13.5, LineHeight = 21 };
     readonly TextBlock _planWhen = new() { FontSize = 11.5, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 8, 0, 0) };
@@ -29,7 +34,7 @@ public sealed class MainWindow : Window
     {
         _engine = engine;
         Title = "Anchor";
-        Width = 1080; Height = 800; MinWidth = 820; MinHeight = 600;
+        Width = 1100; Height = 900; MinWidth = 820; MinHeight = 640;
         Ui.Style(this);
         // Our own header acts as the title bar; Windows still draws the minimise/maximise/close buttons.
         System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome
@@ -74,7 +79,7 @@ public sealed class MainWindow : Window
         root.Children.Add(header);
 
         // Hero: what am I doing right now
-        var hero = new StackPanel { Children = { Ui.Label("Right now"), _now, _inProgress, _next } };
+        var hero = new StackPanel { Children = { _heroTop, _now, _since, _crumb, _heroButtons, _inProgress, _next } };
         var heroCard = Ui.Card(hero, 22);
         heroCard.Background = Ui.B("CardRaised");
         Grid.SetRow(heroCard, 1);
@@ -85,7 +90,18 @@ public sealed class MainWindow : Window
         cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
-        var left = Ui.Card(Scroll("Agenda", _agenda));
+        _cols = cols;
+        var agendaHead = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
+        var agendaLabel = Ui.Label("Agenda"); agendaLabel.Margin = new Thickness(0); agendaLabel.VerticalAlignment = VerticalAlignment.Center;
+        var switcher = ViewSwitcher();
+        DockPanel.SetDock(switcher, Dock.Right);
+        agendaHead.Children.Add(switcher);
+        agendaHead.Children.Add(agendaLabel);
+        var agendaDock = new DockPanel();
+        DockPanel.SetDock(agendaHead, Dock.Top);
+        agendaDock.Children.Add(agendaHead);
+        agendaDock.Children.Add(_agendaHost);
+        var left = Ui.Card(agendaDock);
         var right = Ui.Card(Scroll("Needs attention", _tasks));
         Grid.SetColumn(left, 0); Grid.SetColumn(right, 2);
         cols.Children.Add(left); cols.Children.Add(right);
@@ -106,7 +122,7 @@ public sealed class MainWindow : Window
         DockPanel.SetDock(_planBtn, Dock.Right);
         planHead.Children.Add(_planBtn);
         planHead.Children.Add(planLabel);
-        var planBody = new ScrollViewer { MaxHeight = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
+        var planBody = new ScrollViewer { MaxHeight = 96, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
         var planCard = Ui.Card(new StackPanel { Children = { planHead, planBody, _planWhen } });
         Grid.SetRow(planCard, 3);
         root.Children.Add(planCard);
@@ -143,15 +159,16 @@ public sealed class MainWindow : Window
         _date.Text = now.LocalDateTime.ToString("dddd, d MMMM") + (st.EventsRefreshed is { } r ? $"  ·  synced {Fmt.Time(r.LocalDateTime)}" : "  ·  not synced yet");
 
         var hasTask = st.CurrentTask.Length > 0;
-        _now.Text = hasTask ? st.CurrentTask : "Nothing picked";
-        _now.Foreground = hasTask ? Ui.B("Fg") : Ui.B("Dim");
+        var stale = hasTask && FocusTracker.IsStale(st.CurrentTaskSince, now);
+        _since.Text = !hasTask ? $"Press {_engine.Settings.Hotkey} and choose one thing."
+            : st.CurrentTaskSince is { } since ? (stale ? $"since {Fmt.DayTime(since.LocalDateTime)}" : $"since {Fmt.Time(since)}") : "";
 
-        var live = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
-        _inProgress.Text = live is null
-            ? (hasTask ? $"since {Fmt.Time(st.CurrentTaskSince?.LocalDateTime)}" : $"Press {_engine.Settings.Hotkey} and choose one thing.")
-            : $"In progress: {live.Title} · ends {Fmt.Time(live.End.LocalDateTime)}";
+        var events = _engine.VisibleEvents;
+        var live = events.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
+        _inProgress.Text = live is null ? "" : $"In progress: {live.Title} · ends {Fmt.Time(live.End.LocalDateTime)}";
+        _inProgress.Visibility = live is null ? Visibility.Collapsed : Visibility.Visible;
 
-        var next = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
+        var next = events.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
         if (next is null)
         {
             _next.Text = "No more meetings today.";
@@ -165,9 +182,68 @@ public sealed class MainWindow : Window
         }
     }
 
+    /// <summary>The "Right now" card: task, breadcrumb and the Done / Switch / Clear actions.</summary>
+    void RenderHero()
+    {
+        var st = _engine.Store.State;
+        var now = DateTimeOffset.Now;
+        var hasTask = st.CurrentTask.Length > 0;
+        var stale = hasTask && FocusTracker.IsStale(st.CurrentTaskSince, now);
+
+        _heroTop.Children.Clear();
+        var label = Ui.Label("Right now"); label.Margin = new Thickness(0); label.VerticalAlignment = VerticalAlignment.Center;
+        var chips = new StackPanel { Orientation = Orientation.Horizontal };
+        if (stale) chips.Children.Add(Ui.Chip("From earlier", "warn"));
+        var done = _engine.Focus.DoneToday(now);
+        if (done.Count > 0)
+        {
+            var c = Ui.Chip($"{done.Count} done today", "ok", "✓");
+            c.ToolTip = string.Join(Environment.NewLine, done.Select(d => $"{Fmt.Time(d.At)}  {d.Title}"));
+            c.Margin = new Thickness(0);
+            chips.Children.Add(c);
+        }
+        DockPanel.SetDock(chips, Dock.Right);
+        _heroTop.Children.Add(chips);
+        _heroTop.Children.Add(label);
+
+        _now.Text = hasTask ? st.CurrentTask : "Nothing picked";
+        _now.Foreground = hasTask ? Ui.B("Fg") : Ui.B("Dim");
+
+        _crumb.Children.Clear();
+        if (st.Checkpoint.Length > 0)
+        {
+            _crumb.Children.Add(new TextBlock { Text = "↳  " + st.Checkpoint, FontSize = 13, FontStyle = FontStyles.Italic, Foreground = Ui.B("Dim"), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 700 });
+            var x = Ui.Ghost("✕"); x.ToolTip = "Clear breadcrumb"; x.Margin = new Thickness(6, 0, 0, 0);
+            x.Click += (_, _) => _engine.ClearNote();
+            _crumb.Children.Add(x);
+        }
+
+        _heroButtons.Children.Clear();
+        void Add(Button b) { _heroButtons.Children.Add(b); }
+        Button Act(string text, Action act, bool primary = false, string? tip = null)
+        {
+            var b = primary ? Ui.Primary(text, 16, 7) : Ui.Secondary(text);
+            if (!primary) b.Padding = new Thickness(14, 7, 14, 7);
+            if (tip is not null) b.ToolTip = tip;
+            b.Click += (_, _) => act();
+            return b;
+        }
+        if (!hasTask) Add(Act("Pick one thing", () => new RecoveryWindow(_engine, false).Show(), primary: true));
+        else
+        {
+            if (stale) Add(Act("Still on it", () => _engine.KeepTask(), primary: true, tip: "Same task, starting fresh from now"));
+            Add(Act("Done ✓", () => _engine.FinishTask(), primary: !stale, tip: "Finish it and clear the card"));
+            Add(Act("Switch", () => new RecoveryWindow(_engine, false).Show(), tip: "Change task or add a breadcrumb"));
+            var clear = Ui.Ghost("Clear"); clear.ToolTip = "Drop it without counting it as done"; clear.Margin = new Thickness(0, 0, 0, 0);
+            clear.Click += (_, _) => _engine.ClearTask();
+            Add(clear);
+        }
+    }
+
     void Render()
     {
         RenderNow();
+        RenderHero();
         RenderChips();
         RenderAgenda();
         RenderTasks();
@@ -231,48 +307,149 @@ public sealed class MainWindow : Window
         Render();
     }
 
+    // ------------------------------------------------------------------ agenda views
+
+    UIElement ViewSwitcher()
+    {
+        var group = Guid.NewGuid().ToString("N");
+        var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var (key, text, tip) in new[] { ("All", "All", "Both calendars together"), ("Personal", "Personal", "Personal / Skylight only"), ("Work", "Work", "Work only"), ("Split", "Side by side", "Personal and Work in two columns") })
+        {
+            var rb = new RadioButton
+            {
+                Content = text, GroupName = group, Style = (Style)Application.Current.Resources["Segment"], ToolTip = tip,
+                Padding = new Thickness(10, 5, 10, 5), FontSize = 12, IsChecked = _engine.Settings.AgendaView == key,
+            };
+            rb.Checked += (_, _) =>
+            {
+                if (_engine.Settings.AgendaView == key) return;
+                _engine.Settings.AgendaView = key;
+                try { _engine.Settings.Save(); } catch { /* a read-only settings file must not break the view switch */ }
+                RenderAgenda();
+            };
+            panel.Children.Add(rb);
+        }
+        if (!panel.Children.OfType<RadioButton>().Any(r => r.IsChecked == true)) ((RadioButton)panel.Children[0]).IsChecked = true;
+        return new Border { Background = Ui.B("Field"), CornerRadius = new CornerRadius(8), Padding = new Thickness(2), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), Child = panel };
+    }
+
+    static Brush Hex(string hex, string fallback)
+    {
+        try { return (Brush)new BrushConverter().ConvertFromString(hex)!; }
+        catch { return (Brush)new BrushConverter().ConvertFromString(fallback)!; }
+    }
+
     void RenderAgenda()
     {
-        _agenda.Children.Clear();
+        _agendaHost.Children.Clear();
+        _agendaHost.ColumnDefinitions.Clear();
         var now = DateTimeOffset.Now;
-        var events = _engine.Store.State.CachedEvents.Where(e => !e.Cancelled && e.End > now)
-            .OrderBy(e => e.Start.LocalDateTime.Date).ThenBy(e => e.IsAllDay ? 0 : 1).ThenBy(e => e.Start).ToList();
-        if (events.Count == 0)
+        var all = _engine.VisibleEvents.Where(e => !e.Cancelled && e.End > now).ToList();
+        var view = _engine.Settings.AgendaView;
+        var split = view == "Split";
+
+        if (_cols is not null)
         {
-            _agenda.Children.Add(Empty("Nothing scheduled", "Connect a calendar, or enjoy the space."));
+            _cols.ColumnDefinitions[0].Width = new GridLength(split ? 2.2 : 1, GridUnitType.Star);
+            _cols.ColumnDefinitions[2].Width = new GridLength(split ? 1 : 1.25, GridUnitType.Star);
+        }
+
+        if (all.Count == 0)
+        {
+            _agendaHost.Children.Add(Empty("Nothing scheduled", "Connect a calendar, or enjoy the space."));
             return;
         }
 
+        if (split)
+        {
+            _agendaHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            _agendaHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+            _agendaHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var i = 0;
+            foreach (var g in new[] { CalGroup.Personal, CalGroup.Work })
+            {
+                var col = new DockPanel();
+                var head = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+                head.Children.Add(new System.Windows.Shapes.Ellipse { Width = 9, Height = 9, Fill = Hex(g == CalGroup.Work ? CalendarPrefs.WorkColor : CalendarPrefs.PersonalColor, "#888"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+                head.Children.Add(new TextBlock { Text = g.ToString(), FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+                DockPanel.SetDock(head, Dock.Top);
+                col.Children.Add(head);
+                var mine = all.Where(e => _engine.GroupOf(e) == g).ToList();
+                col.Children.Add(new ScrollViewer
+                {
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Content = mine.Count == 0 ? Empty($"No {g} events", "") : Days(mine, now, tagGroup: false, compact: true),
+                });
+                Grid.SetColumn(col, i); _agendaHost.Children.Add(col); i += 2;
+            }
+            return;
+        }
+
+        var shown = view switch
+        {
+            "Personal" => all.Where(e => _engine.GroupOf(e) == CalGroup.Personal).ToList(),
+            "Work" => all.Where(e => _engine.GroupOf(e) == CalGroup.Work).ToList(),
+            _ => all,
+        };
+        _agendaHost.Children.Add(new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = shown.Count == 0 ? Empty($"No {view} events", "Nothing in this calendar for now.") : Days(shown, now, tagGroup: view == "All", compact: false),
+        });
+    }
+
+    StackPanel Days(IEnumerable<CalendarEvent> events, DateTimeOffset now, bool tagGroup, bool compact)
+    {
+        var panel = new StackPanel();
         DateTime? day = null;
-        foreach (var e in events)
+        foreach (var e in events.OrderBy(e => e.Start.LocalDateTime.Date).ThenBy(e => e.IsAllDay ? 0 : 1).ThenBy(e => e.Start))
         {
             if (day != e.Start.LocalDateTime.Date)
             {
                 day = e.Start.LocalDateTime.Date;
-                _agenda.Children.Add(new TextBlock
+                panel.Children.Add(new TextBlock
                 {
                     Text = day == DateTime.Today ? "Today" : day == DateTime.Today.AddDays(1) ? "Tomorrow" : day.Value.ToString("dddd d MMM"),
-                    FontWeight = FontWeights.SemiBold, Foreground = Ui.B("Accent"), Margin = new Thickness(0, _agenda.Children.Count == 0 ? 0 : 16, 0, 6),
+                    FontWeight = FontWeights.SemiBold, Foreground = Ui.B("Accent"), Margin = new Thickness(0, panel.Children.Count == 0 ? 0 : 16, 0, 6),
                 });
             }
-            var live = e.Start <= now && !e.IsAllDay;
-            var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(82) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var time = new TextBlock { Text = e.IsAllDay ? "all day" : Fmt.Time(e.Start), Foreground = Ui.B("Dim"), VerticalAlignment = VerticalAlignment.Center };
-            var title = new TextBlock { Text = e.Title, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
-            row.Children.Add(time);
-            Grid.SetColumn(title, 1); row.Children.Add(title);
-            if (live) { var c = Ui.Chip("NOW", "accent"); c.Margin = new Thickness(8, 0, 0, 0); Grid.SetColumn(c, 2); row.Children.Add(c); }
-            else if (!e.IsAllDay && (e.Start - now).TotalMinutes <= 30)
-            {
-                var c = Ui.Chip($"in {Math.Ceiling((e.Start - now).TotalMinutes):0}m", (e.Start - now).TotalMinutes <= 5 ? "alarm" : "warn");
-                c.Margin = new Thickness(8, 0, 0, 0); Grid.SetColumn(c, 2); row.Children.Add(c);
-            }
-            row.ToolTip = $"{Fmt.Time(e.Start.LocalDateTime)}–{Fmt.Time(e.End.LocalDateTime)} · {e.Source}" + (e.Location is { Length: > 0 } l ? $" · {l}" : "");
-            _agenda.Children.Add(row);
+            panel.Children.Add(AgendaRow(e, now, tagGroup, compact));
         }
+        return panel;
+    }
+
+    UIElement AgendaRow(CalendarEvent e, DateTimeOffset now, bool tagGroup, bool compact)
+    {
+        var live = e.Start <= now && !e.IsAllDay;
+        var work = _engine.GroupOf(e) == CalGroup.Work;
+        var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 74 : 86) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var bar = new Border { CornerRadius = new CornerRadius(2), Background = Hex(_engine.ColorOf(e), work ? CalendarPrefs.WorkColor : CalendarPrefs.PersonalColor), Margin = new Thickness(0, 1, 0, 1) };
+        var time = new TextBlock { Text = e.IsAllDay ? "all day" : Fmt.Time(e.Start), Foreground = Ui.B("Dim"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0), TextWrapping = TextWrapping.NoWrap };
+        var title = new TextBlock
+        {
+            Text = e.Title, VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = compact ? TextTrimming.None : TextTrimming.CharacterEllipsis, TextWrapping = compact ? TextWrapping.Wrap : TextWrapping.NoWrap,
+        };
+        row.Children.Add(bar);
+        Grid.SetColumn(time, 1); row.Children.Add(time);
+        Grid.SetColumn(title, 2); row.Children.Add(title);
+
+        var tail = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (tagGroup && work) tail.Children.Add(new TextBlock { Text = "WORK", FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Hex(CalendarPrefs.WorkColor, "#5B9DFF"), Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+        if (live) { var c = Ui.Chip("NOW", "accent"); c.Margin = new Thickness(8, 0, 0, 0); tail.Children.Add(c); }
+        else if (!e.IsAllDay && (e.Start - now).TotalMinutes <= 30)
+        {
+            var c = Ui.Chip($"in {Math.Ceiling((e.Start - now).TotalMinutes):0}m", (e.Start - now).TotalMinutes <= 5 ? "alarm" : "warn");
+            c.Margin = new Thickness(8, 0, 0, 0); tail.Children.Add(c);
+        }
+        Grid.SetColumn(tail, 3); row.Children.Add(tail);
+        row.ToolTip = $"{Fmt.Time(e.Start.LocalDateTime)}–{Fmt.Time(e.End.LocalDateTime)} · {e.Source}" + (e.Location is { Length: > 0 } l ? $" · {l}" : "");
+        return row;
     }
 
     void RenderTasks()
@@ -330,7 +507,7 @@ public sealed class MainWindow : Window
         var meta = $"{t.Source} · {Clean(t.From)}{(t.Due is { } d ? $" · due {Fmt.DayTime(d.LocalDateTime)}" : "")}";
         row.Children.Add(new TextBlock { Text = meta, FontSize = 12, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
 
-        var btns = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(-9, 8, 0, -4) };
+        var btns = new WrapPanel { Margin = new Thickness(-9, 8, 0, -4) };
         void Add(string text, Action act, bool accent = false)
         {
             var b = Ui.Ghost(text);
