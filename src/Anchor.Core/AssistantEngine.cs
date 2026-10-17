@@ -1,0 +1,369 @@
+using Anchor.Core.AI;
+using Anchor.Core.Auth;
+using Anchor.Core.Connectors;
+using Anthropic;
+
+namespace Anchor.Core;
+
+/// <summary>
+/// Orchestrates connectors, local alert logic and AI. Meeting alerts depend only on the cached
+/// calendar and the clock, never on the network or on Claude.
+/// </summary>
+public sealed class AssistantEngine : IDisposable
+{
+    readonly AnchorSettings _settings;
+    readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    readonly List<ICalendarSource> _calendars = new();
+    readonly List<IMessageSource> _messages = new();
+    readonly Dictionary<string, OAuthSession> _sessions = new();
+    readonly HashSet<string> _activeAlerts = new();
+    readonly CancellationTokenSource _cts = new();
+    readonly object _refreshGate = new();
+    DateTimeOffset _lastMessageRefresh = DateTimeOffset.MinValue;
+    DateTimeOffset _lastCheckIn = DateTimeOffset.Now;
+    bool _refreshing;
+    readonly List<CalendarEvent> _testEvents = new();
+
+    public StateStore Store { get; }
+    public TokenStore Tokens { get; } = new();
+    public BudgetTracker Budget { get; }
+    public ClaudeService? Claude { get; private set; }
+    public Dictionary<string, string> SourceErrors { get; } = new();
+
+    public event Action<DueAlert>? AlertDue;
+    public event Action? Changed;
+    public event Action? CheckInDue;
+
+    public AssistantEngine(AnchorSettings settings, StateStore store)
+    {
+        _settings = settings;
+        Store = store;
+        Budget = new BudgetTracker(store, settings.Ai);
+        BuildAi();
+        BuildSources();
+    }
+
+    public AnchorSettings Settings => _settings;
+
+    void BuildAi()
+    {
+        var key = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        if (string.IsNullOrWhiteSpace(key) || !_settings.Ai.Enabled) return;
+        Claude = new ClaudeService(new AnthropicClient { ApiKey = key }, _settings.Ai, Budget);
+    }
+
+    void BuildSources()
+    {
+        ISet<string> Seen() => Store.State.SeenItemIds;
+
+        var g = _settings.Google;
+        if (g.Enabled && g.ClientId.Length > 0)
+        {
+            var s = Session(GoogleAuth.Provider(g));
+            if (g.Calendar) _calendars.Add(new GoogleCalendarSource(s));
+            if (g.Gmail) _messages.Add(new GmailSource(s, Seen));
+        }
+
+        var m = _settings.Microsoft;
+        if (m.Enabled && m.ClientId.Length > 0)
+        {
+            var s = Session(MicrosoftAuth.Provider(m));
+            if (m.Calendar) _calendars.Add(new OutlookCalendarSource(s));
+            if (m.Mail) _messages.Add(new OutlookMailSource(s, Seen));
+            if (m.Teams) _messages.Add(new TeamsChatSource(s, Seen));
+        }
+
+        var slackToken = Environment.GetEnvironmentVariable("ANCHOR_SLACK_TOKEN") is { Length: > 0 } t ? t : _settings.Slack.UserToken;
+        if (_settings.Slack.Enabled && slackToken.Length > 0)
+            _messages.Add(new SlackSource(_http, slackToken, Seen));
+
+        foreach (var f in _settings.IcsFeeds.Where(f => f.Url.Length > 0))
+            _calendars.Add(new IcsCalendarSource(_http, f));
+    }
+
+    OAuthSession Session(OAuthProvider p)
+    {
+        var s = new OAuthSession(_http, Tokens, p);
+        _sessions[p.Name] = s;
+        return s;
+    }
+
+    /// <summary>Dummy meeting for testing the alert pipeline end to end (tray menu: Test alert).</summary>
+    public void AddTestMeeting(int startsInMinutes)
+    {
+        var start = DateTimeOffset.Now.AddMinutes(startsInMinutes);
+        _testEvents.Add(new CalendarEvent("test-" + Guid.NewGuid().ToString("N")[..6], "Test", "Test meeting (Anchor)", start, start.AddMinutes(15),
+            "https://example.com/join"));
+        Store.Mutate(s => s.CachedEvents = Dedupe(s.CachedEvents.Concat(_testEvents)).ToList());
+        Tick(DateTimeOffset.Now);
+        Changed?.Invoke();
+    }
+
+    public bool IsConnected(string provider) => _sessions.TryGetValue(provider, out var s) && s.IsConnected;
+    public IReadOnlyCollection<string> Providers => _sessions.Keys;
+
+    public Task ConnectAsync(string provider, CancellationToken ct) =>
+        _sessions.TryGetValue(provider, out var s)
+            ? s.ConnectAsync(OAuthSession.OpenInBrowser, ct)
+            : throw new InvalidOperationException($"{provider} is not enabled in settings.json (set Enabled and ClientId, then restart).");
+
+    // ---------------------------------------------------------------- loop
+
+    public void Start() => _ = Task.Run(LoopAsync);
+
+    async Task LoopAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        _ = RefreshAllAsync(forceMessages: true);
+        try
+        {
+            do
+            {
+                Tick(DateTimeOffset.Now);
+                if (DateTimeOffset.Now - (Store.State.EventsRefreshed ?? DateTimeOffset.MinValue) > TimeSpan.FromMinutes(_settings.CalendarRefreshMinutes))
+                    _ = RefreshAllAsync(forceMessages: false);
+            } while (await timer.WaitForNextTickAsync(_cts.Token));
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    /// <summary>Called by the UI after resume from sleep or unlock: reconcile immediately.</summary>
+    public void OnResume()
+    {
+        Tick(DateTimeOffset.Now);
+        _ = RefreshAllAsync(forceMessages: true);
+    }
+
+    public void Tick(DateTimeOffset now)
+    {
+        var fired = Store.State.FiredAlerts;
+        var due = AlertScheduler.Evaluate(Store.State.CachedEvents, now, fired, _settings.AlertOffsetsMinutes);
+        foreach (var d in due)
+        {
+            var k = EventKey(d.Event);
+            if (_activeAlerts.Contains(k)) continue;
+            if (Store.State.SnoozedUntil.TryGetValue(k, out var until) && until > now) continue;
+            _activeAlerts.Add(k);
+            AlertDue?.Invoke(d);
+        }
+
+        if (CheckInIsDue(now)) { _lastCheckIn = now; CheckInDue?.Invoke(); }
+    }
+
+    bool CheckInIsDue(DateTimeOffset now)
+    {
+        if (_settings.CheckInMinutes <= 0 || _activeAlerts.Count > 0) return false;
+        if (now.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) return false;
+        if (!TimeOnly.TryParse(_settings.WorkdayStart, out var s) || !TimeOnly.TryParse(_settings.WorkdayEnd, out var e)) return false;
+        var t = TimeOnly.FromDateTime(now.LocalDateTime);
+        if (t < s || t > e) return false;
+        // Don't nag right before a meeting; the meeting alerts already cover that.
+        var next = AlertScheduler.NextEvent(Store.State.CachedEvents, now);
+        if (next is not null && next.Start - now < TimeSpan.FromMinutes(10)) return false;
+        return now - _lastCheckIn >= TimeSpan.FromMinutes(_settings.CheckInMinutes);
+    }
+
+    static string EventKey(CalendarEvent e) => $"{e.Source}|{e.Id}|{e.Start.ToUnixTimeSeconds()}";
+
+    public void Acknowledge(DueAlert alert)
+    {
+        Store.Mutate(s =>
+        {
+            foreach (var k in alert.KeysToMark) s.FiredAlerts.Add(k);
+            s.SnoozedUntil.Remove(EventKey(alert.Event));
+        });
+        _activeAlerts.Remove(EventKey(alert.Event));
+        Tick(DateTimeOffset.Now); // a closer offset may already be due
+    }
+
+    public void Snooze(DueAlert alert, int minutes)
+    {
+        var until = DateTimeOffset.Now.AddMinutes(minutes);
+        // Never snooze past the meeting start unless it already started.
+        if (alert.Event.Start > DateTimeOffset.Now && until > alert.Event.Start) until = alert.Event.Start;
+        Store.Mutate(s => s.SnoozedUntil[EventKey(alert.Event)] = until);
+        _activeAlerts.Remove(EventKey(alert.Event));
+    }
+
+    // ---------------------------------------------------------------- refresh
+
+    public async Task RefreshAllAsync(bool forceMessages)
+    {
+        lock (_refreshGate) { if (_refreshing) return; _refreshing = true; }
+        try
+        {
+            await RefreshCalendarsAsync();
+            if (forceMessages || DateTimeOffset.Now - _lastMessageRefresh > TimeSpan.FromMinutes(_settings.MessageRefreshMinutes))
+                await RefreshMessagesAsync();
+        }
+        finally { lock (_refreshGate) _refreshing = false; }
+        Changed?.Invoke();
+    }
+
+    async Task RefreshCalendarsAsync()
+    {
+        var from = DateTimeOffset.Now.AddHours(-2);
+        var to = DateTimeOffset.Now.AddHours(48);
+        var fresh = new List<CalendarEvent>();
+        var failed = new List<string>();
+
+        foreach (var src in _calendars)
+        {
+            try
+            {
+                fresh.AddRange(await src.GetEventsAsync(from, to, _cts.Token));
+                SourceErrors.Remove(src.Name);
+            }
+            catch (Exception ex)
+            {
+                SourceErrors[src.Name] = ex.Message;
+                failed.Add(src.Name);
+            }
+        }
+
+        // A failing source keeps its last good events so alerts survive an outage.
+        var keep = Store.State.CachedEvents.Where(e => failed.Any(f => e.Source.StartsWith(f, StringComparison.OrdinalIgnoreCase)) && e.End > from);
+        _testEvents.RemoveAll(e => e.End < DateTimeOffset.Now);
+        var merged = Dedupe(fresh.Concat(keep).Concat(_testEvents)).Where(e => e.End > from && e.Start < to).ToList();
+
+        if (_calendars.Count > 0 || _testEvents.Count > 0)
+            Store.Mutate(s => { s.CachedEvents = merged; if (failed.Count < _calendars.Count) s.EventsRefreshed = DateTimeOffset.Now; });
+    }
+
+    public static IEnumerable<CalendarEvent> Dedupe(IEnumerable<CalendarEvent> events) =>
+        events.GroupBy(e => (Norm(e.Title), e.Start, e.IsAllDay))
+              .Select(g => g.OrderByDescending(e => e.JoinUrl is not null).First());
+
+    static string Norm(string s) => new string(s.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+    async Task RefreshMessagesAsync()
+    {
+        _lastMessageRefresh = DateTimeOffset.Now;
+        var since = DateTimeOffset.Now.AddDays(-2);
+        var newItems = new List<InboxItem>();
+
+        foreach (var src in _messages)
+        {
+            try
+            {
+                newItems.AddRange(await src.GetRecentAsync(since, _cts.Token));
+                SourceErrors.Remove(src.Name);
+            }
+            catch (Exception ex) { SourceErrors[src.Name] = ex.Message; }
+        }
+        if (newItems.Count == 0) return;
+
+        var created = new List<SuggestedTask>();
+        var aiEligible = newItems.Where(i => !i.IsWork || _settings.Ai.SendWorkContentToClaude).ToList();
+        var local = newItems.Except(aiEligible).ToList();
+
+        // Local heuristics for anything we will not (or cannot) send to Claude.
+        foreach (var i in local.Where(LooksActionable))
+            created.Add(ToTask(i, i.Subject.Length > 0 ? i.Subject : Shorten(i.Snippet), 0.4, null));
+
+        var classifiedIds = new HashSet<string>();
+        if (Claude is not null && aiEligible.Count > 0)
+        {
+            foreach (var chunk in aiEligible.Chunk(15))
+            {
+                try
+                {
+                    var byId = chunk.ToDictionary(i => i.Id);
+                    foreach (var c in await Claude.ClassifyAsync(chunk, _cts.Token))
+                    {
+                        if (!byId.TryGetValue(c.Id, out var item)) continue;
+                        classifiedIds.Add(c.Id);
+                        if (c.Action && c.Confidence >= 0.6 && c.Title.Length > 0)
+                            created.Add(ToTask(item, c.Title, c.Confidence, c.Due));
+                    }
+                }
+                catch (Exception ex) { SourceErrors["Claude"] = ex.Message; }
+            }
+        }
+        // AI unavailable, over budget or failed: fall back to heuristics so nothing is silently lost.
+        foreach (var i in aiEligible.Where(i => !classifiedIds.Contains(i.Id) && LooksActionable(i)))
+            created.Add(ToTask(i, i.Subject.Length > 0 ? i.Subject : Shorten(i.Snippet), 0.4, null));
+
+        Store.Mutate(s =>
+        {
+            foreach (var i in newItems) s.SeenItemIds.Add(i.Id);
+            foreach (var t in created.Where(t => s.Tasks.All(x => x.Id != t.Id))) s.Tasks.Add(t);
+        });
+    }
+
+    static readonly string[] ActionWords =
+        ["please", "can you", "could you", "action required", "deadline", "by eod", "by end of day", "urgent", "asap", "reminder", "rsvp", "approve", "review", "?"];
+
+    public static bool LooksActionable(InboxItem i)
+    {
+        var t = (i.Subject + " " + i.Snippet).ToLowerInvariant();
+        if (t.Contains("unsubscribe") || i.From.Contains("noreply", StringComparison.OrdinalIgnoreCase) || i.From.Contains("no-reply", StringComparison.OrdinalIgnoreCase)) return false;
+        return ActionWords.Any(t.Contains);
+    }
+
+    static SuggestedTask ToTask(InboxItem i, string title, double conf, DateTimeOffset? due) => new()
+    {
+        Id = i.Id, Title = title, Source = i.Source, From = i.From, Link = i.Link, Confidence = conf, Due = due,
+    };
+
+    static string Shorten(string s) => s.Length <= 80 ? s : s[..80] + "…";
+
+    // ---------------------------------------------------------------- tasks & focus
+
+    public void SetStatus(string id, SuggestionStatus status) =>
+        Store.Mutate(s => { var t = s.Tasks.FirstOrDefault(x => x.Id == id); if (t is not null) t.Status = status; });
+
+    public void SetCurrentTask(string title) =>
+        Store.Mutate(s => { s.CurrentTask = title; s.CurrentTaskSince = DateTimeOffset.Now; });
+
+    public void SaveCheckpoint(string note) =>
+        Store.Mutate(s => { s.Checkpoint = note; s.CheckpointAt = DateTimeOffset.Now; });
+
+    public void CheckInAnswered() => _lastCheckIn = DateTimeOffset.Now;
+
+    public async Task<string> PlanDayAsync()
+    {
+        if (Claude is null) return "AI is off: set the ANTHROPIC_API_KEY environment variable and restart Anchor.";
+        if (!Budget.Allow(background: false)) return "AI budget limit reached for this month. " + Budget.Summary;
+        var now = DateTimeOffset.Now;
+        var plan = await Claude.PlanDayAsync(
+            Store.State.CachedEvents.Where(e => e.End > now && e.Start < now.AddHours(36)),
+            Store.State.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).Take(12),
+            Store.State.CurrentTask, _cts.Token);
+        Store.Mutate(s => { s.LastPlan = plan; s.LastPlanAt = DateTimeOffset.Now; });
+        return plan;
+    }
+
+    /// <summary>Local summary first (works offline); AI polish only when available.</summary>
+    public string RecoverLocal()
+    {
+        var now = DateTimeOffset.Now;
+        var st = Store.State;
+        var next = AlertScheduler.NextEvent(st.CachedEvents, now);
+        var lines = new List<string>
+        {
+            st.CurrentTask.Length > 0
+                ? $"You were working on: {st.CurrentTask}" + (st.CurrentTaskSince is { } since ? $" (since {since.LocalDateTime:HH:mm})" : "")
+                : "No current task set. Pick one thing and type it below.",
+        };
+        if (st.Checkpoint.Length > 0) lines.Add($"Last note ({st.CheckpointAt?.LocalDateTime:HH:mm}): {st.Checkpoint}");
+        lines.Add(next is null ? "No more meetings on the calendar." : $"Next: {next.Title} {AlertScheduler.Describe(next, now)} ({next.Start.LocalDateTime:HH:mm}).");
+        var top = st.Tasks.Where(t => t.Status == SuggestionStatus.Accepted || t.Status == SuggestionStatus.Pending).OrderByDescending(t => t.Confidence).FirstOrDefault();
+        if (top is not null) lines.Add($"Open follow-up: {top.Title}");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    public async Task<string?> RecoverAiAsync()
+    {
+        if (Claude is null || !Budget.Allow(background: false)) return null;
+        var st = Store.State;
+        return await Claude.RecoverAsync(st.CurrentTask, st.Checkpoint, AlertScheduler.NextEvent(st.CachedEvents, DateTimeOffset.Now),
+            st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted), _cts.Token);
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _http.Dispose();
+    }
+}

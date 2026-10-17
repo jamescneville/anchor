@@ -1,0 +1,116 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Anchor.Core;
+
+public static class AppPaths
+{
+    public static string Dir
+    {
+        get
+        {
+            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Anchor");
+            Directory.CreateDirectory(d);
+            return d;
+        }
+    }
+    public static string SettingsFile => Path.Combine(Dir, "settings.json");
+    public static string StateFile => Path.Combine(Dir, "state.json");
+    public static string TokensFile => Path.Combine(Dir, "tokens.bin");
+}
+
+public sealed class GoogleSettings
+{
+    public bool Enabled { get; set; }
+    /// <summary>OAuth client of type "Desktop app" from Google Cloud Console.</summary>
+    public string ClientId { get; set; } = "";
+    public string ClientSecret { get; set; } = "";
+    public bool Calendar { get; set; } = true;
+    public bool Gmail { get; set; } = true;
+}
+
+public sealed class MicrosoftSettings
+{
+    public bool Enabled { get; set; }
+    /// <summary>Public-client app registration (Entra ID). Redirect URI: http://localhost</summary>
+    public string ClientId { get; set; } = "";
+    /// <summary>"organizations" for work accounts, "common" for both, or your tenant id.</summary>
+    public string Tenant { get; set; } = "organizations";
+    public bool Calendar { get; set; } = true;
+    public bool Mail { get; set; } = true;
+    public bool Teams { get; set; } = true;
+}
+
+public sealed class SlackSettings
+{
+    public bool Enabled { get; set; }
+    /// <summary>User token (xoxp-...) with search:read. Stored in settings; prefer env ANCHOR_SLACK_TOKEN.</summary>
+    public string UserToken { get; set; } = "";
+}
+
+public sealed class IcsFeed
+{
+    public string Name { get; set; } = "";
+    public string Url { get; set; } = "";
+}
+
+public sealed class AiSettings
+{
+    public bool Enabled { get; set; } = true;
+    public string FastModel { get; set; } = "claude-haiku-5-5";
+    public string PlanModel { get; set; } = "claude-sonnet-5-5";
+    public double MonthlyBudgetUsd { get; set; } = 20;
+    public double DailySoftCapUsd { get; set; } = 0.60;
+    public double WarnUsd { get; set; } = 15;
+    public double CutoffUsd { get; set; } = 19;
+    /// <summary>
+    /// When false (default) work items (Outlook, Teams, Slack) are never sent to Claude;
+    /// they are still shown in the inbox, with local heuristics only.
+    /// </summary>
+    public bool SendWorkContentToClaude { get; set; }
+    /// <summary>USD per million tokens. Verify against current published pricing.</summary>
+    public Dictionary<string, double[]> PricePerMTok { get; set; } = new()
+    {
+        ["claude-haiku-5-5"] = [0.10, 0.50],
+        ["claude-sonnet-5-5"] = [2.00, 10.00],
+    };
+}
+
+public sealed class AnchorSettings
+{
+    public int[] AlertOffsetsMinutes { get; set; } = [15, 5, 1, 0];
+    /// <summary>Standard | Strong | Maximum</summary>
+    public string AlertIntensity { get; set; } = "Strong";
+    public int SnoozeMinutes { get; set; } = 2;
+    public int CheckInMinutes { get; set; } = 30;
+    public bool SpeakAlerts { get; set; } = true;
+    /// <summary>Global "Where was I?" shortcut, e.g. "Ctrl+Space", "Ctrl+Shift+W", "Win+Shift+A".</summary>
+    public string Hotkey { get; set; } = "Ctrl+Space";
+    /// <summary>Local time, HH:mm. Focus check-ins only run inside this window on weekdays; meeting alerts always run.</summary>
+    public string WorkdayStart { get; set; } = "08:30";
+    public string WorkdayEnd { get; set; } = "17:30";
+    public int CalendarRefreshMinutes { get; set; } = 3;
+    public int MessageRefreshMinutes { get; set; } = 10;
+    public GoogleSettings Google { get; set; } = new();
+    public MicrosoftSettings Microsoft { get; set; } = new();
+    public SlackSettings Slack { get; set; } = new();
+    public List<IcsFeed> IcsFeeds { get; set; } = new();
+    public AiSettings Ai { get; set; } = new();
+
+    static readonly JsonSerializerOptions Json = new() { WriteIndented = true, ReadCommentHandling = JsonCommentHandling.Skip };
+
+    public static AnchorSettings Load(string? path = null)
+    {
+        path ??= AppPaths.SettingsFile;
+        if (!File.Exists(path))
+        {
+            var fresh = new AnchorSettings();
+            fresh.Save(path);
+            return fresh;
+        }
+        return JsonSerializer.Deserialize<AnchorSettings>(File.ReadAllText(path), Json) ?? new AnchorSettings();
+    }
+
+    public void Save(string? path = null) =>
+        File.WriteAllText(path ?? AppPaths.SettingsFile, JsonSerializer.Serialize(this, Json));
+}
