@@ -47,6 +47,19 @@ Skylight has no public API; it mirrors a Google/Outlook/iCloud calendar. Anchor 
 - No screenshots, keystroke capture or window tracking. Focus support is a manual current task, a check-in
   prompt every `CheckInMinutes` during work hours, and the recovery hotkey.
 
+## Claude desktop bridge (no API key needed)
+
+Anchor can hand work to the Claude desktop app you already run, and take results back:
+
+- **Ask Claude** (header menu, tray menu, and the "Where was I?" window) opens Claude desktop through its `claude://` links with a
+  ready prompt built from your Anchor agenda and follow-ups. Nothing is sent for you: the prompt lands in the composer and you press Enter.
+  *Plan my day* and *Triage my inbox* start a Cowork task given the bridge folder; *Where was I?* is a plain chat.
+- **Bridge folder** (`%LOCALAPPDATA%\Anchorridge`): Claude writes `plan.md` (shown in the Plan card, labelled "From Claude desktop")
+  and `tasks.json` (added to Needs attention). Anchor only reads these files, treats them as untrusted text, and only opens http(s) links.
+  Format of `tasks.json`: `[{"id","title","source","from","link","due","confidence"}]`.
+- A **scheduled Claude task** can write the same files on a timer, so the plan and triage refresh without you asking.
+- `Settings → Claude desktop → Include work meetings and follow-ups` controls whether work items are redacted from these prompts.
+
 ## Redaction before AI
 
 With `Ai.SendWorkContentToClaude` off (default), **nothing from work sources is put in an AI prompt**: mail/chat triage skips

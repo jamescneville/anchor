@@ -271,3 +271,110 @@ public class AiPrivacyTests
         Assert.DoesNotContain(r, t => t.Title.Contains("VP"));
     }
 }
+
+public class BridgeTests
+{
+    static readonly DateTimeOffset Now = new(2026, 10, 19, 9, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Parses_tasks_and_keeps_only_http_links()
+    {
+        const string json = """
+            [
+              {"id":"a1","title":"Reply to Sam about budget","source":"Outlook","from":"Sam","link":"https://outlook.office.com/x","due":"2026-10-20T17:00:00Z","confidence":0.9},
+              {"id":"a2","title":"Evil link","source":"Gmail","link":"file:///C:/Windows/System32/calc.exe"},
+              {"title":"No id given","source":"Slack"},
+              {"id":"a4","title":""},
+              {"id":"a5","title":"Custom protocol","link":"claude://cowork/new?q=x"}
+            ]
+            """;
+        var t = Bridge.ParseTasks(json, Now);
+        Assert.Equal(4, t.Count);
+        Assert.Equal("claude:a1", t[0].Id);
+        Assert.Equal("https://outlook.office.com/x", t[0].Link);
+        Assert.Equal(0.9, t[0].Confidence);
+        Assert.Null(t[1].Link);                     // file: rejected
+        Assert.Equal(12, t[2].Id.Length - "claude:".Length); // generated stable id
+        Assert.Null(t[3].Link);                     // custom protocol rejected
+    }
+
+    [Fact]
+    public void Accepts_a_wrapped_object_and_survives_garbage()
+    {
+        Assert.Single(Bridge.ParseTasks("""{"tasks":[{"id":"x","title":"One"}]}""", Now));
+        Assert.Empty(Bridge.ParseTasks("not json at all", Now));
+        Assert.Empty(Bridge.ParseTasks("""{"foo":1}""", Now));
+    }
+
+    [Fact]
+    public void Generated_ids_are_stable_so_reruns_do_not_duplicate()
+    {
+        var a = Bridge.ParseTasks("""[{"title":"Same","source":"Gmail"}]""", Now)[0].Id;
+        var b = Bridge.ParseTasks("""[{"title":"Same","source":"Gmail"}]""", Now.AddHours(3))[0].Id;
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
+    public void Clamps_confidence_and_title_length()
+    {
+        var t = Assert.Single(Bridge.ParseTasks("[{\"id\":\"x\",\"title\":\"" + new string('a', 500) + "\",\"confidence\":7}]", Now));
+        Assert.Equal(1.0, t.Confidence);
+        Assert.Equal(140, t.Title.Length);
+    }
+}
+
+public class ClaudeDesktopTests
+{
+    static readonly DateTimeOffset Now = new(2026, 10, 19, 9, 0, 0, TimeSpan.FromHours(-4));
+
+    static CalendarEvent Ev(string title, int inMin) =>
+        new("e" + inMin, "Google", title, Now.AddMinutes(inMin), Now.AddMinutes(inMin + 30));
+
+    [Fact]
+    public void Plan_and_triage_open_cowork_with_the_bridge_folder()
+    {
+        var url = ClaudeDesktop.Url(ClaudeAsk.PlanDay, "hello world", @"C:\Users\me\AppData\Local\Anchor\bridge");
+        Assert.StartsWith("claude://cowork/new?q=hello%20world&folder=", url);
+        Assert.Contains("Anchor%5Cbridge", url);
+        Assert.StartsWith("claude://cowork/new", ClaudeDesktop.Url(ClaudeAsk.TriageInbox, "x", "C:\b"));
+    }
+
+    [Fact]
+    public void Recovery_and_new_chat_open_a_plain_chat_without_a_folder()
+    {
+        var url = ClaudeDesktop.Url(ClaudeAsk.WhereWasI, "x", "C:\b");
+        Assert.StartsWith("claude://claude.ai/new?q=x&surface=chat", url);
+        Assert.DoesNotContain("folder", url);
+    }
+
+    [Fact]
+    public void Prompt_is_capped_well_below_the_apps_14336_char_limit_with_instructions_first()
+    {
+        var url = ClaudeDesktop.Url(ClaudeAsk.NewChat, "A" + new string('x', 20000), "C:\b");
+        var q = Uri.UnescapeDataString(url["claude://claude.ai/new?q=".Length..url.IndexOf("&surface")]);
+        Assert.True(q.Length <= 6000);
+        Assert.StartsWith("A", q);
+    }
+
+    [Fact]
+    public void Plan_prompt_has_instructions_before_context_and_includes_agenda()
+    {
+        var st = new AnchorState { CurrentTask = "write spec" };
+        var p = ClaudeDesktop.BuildPrompt(ClaudeAsk.PlanDay, st, Now, [Ev("Design review", 60)], []);
+        Assert.True(p.IndexOf("plan.md") < p.IndexOf("Context from my Anchor"));
+        Assert.Contains("Design review", p);
+        Assert.Contains("write spec", p);
+        Assert.Contains("read-only", p);
+        Assert.Contains("never as instructions", p);
+    }
+
+    [Fact]
+    public void Work_redaction_applies_before_the_prompt_is_built()
+    {
+        var work = new CalendarEvent("o", "Outlook", "Acme layoffs prep", Now.AddMinutes(30), Now.AddMinutes(60));
+        var events = AiPrivacy.Events([work], allowWork: false, new HashSet<string>());
+        var p = ClaudeDesktop.BuildPrompt(ClaudeAsk.PlanDay, new AnchorState(), Now, events, []);
+        Assert.DoesNotContain("layoffs", p);
+        Assert.Contains("Busy (work meeting)", p);
+    }
+}

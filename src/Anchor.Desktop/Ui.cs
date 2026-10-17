@@ -59,6 +59,30 @@ public static class Ui
         return panel;
     }
 
+    /// <summary>Dark popup menu opened under <paramref name="anchor"/>. Items: (label, action); a null action draws a divider.</summary>
+    public static void ShowMenu(FrameworkElement anchor, params (string Label, Action? Do)[] items)
+    {
+        var stack = new StackPanel { MinWidth = 230 };
+        var popup = new System.Windows.Controls.Primitives.Popup
+        {
+            PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom, StaysOpen = false,
+            AllowsTransparency = true, VerticalOffset = 6, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade,
+        };
+        foreach (var (label, act) in items)
+        {
+            if (act is null) { stack.Children.Add(new Border { Height = 1, Background = B("Line"), Margin = new Thickness(6, 4, 6, 4) }); continue; }
+            var b = new Button { Content = label, Style = (Style)Application.Current.Resources["Ghost"], HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0), FontSize = 13, Foreground = B("Fg") };
+            b.Click += (_, _) => { popup.IsOpen = false; act(); };
+            stack.Children.Add(b);
+        }
+        popup.Child = new Border
+        {
+            Background = B("CardRaised"), BorderBrush = B("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(6), Margin = new Thickness(14),
+            Child = stack, Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 0, Opacity = 0.6, Color = Colors.Black },
+        };
+        popup.IsOpen = true;
+    }
+
     public static Border Card(UIElement child, double pad = 18) => new()
     {
         Background = B("Card"), BorderBrush = B("Line"), BorderThickness = new Thickness(1),
@@ -95,4 +119,15 @@ public static class Ui
         new() { Content = text, Style = (Style)Application.Current.Resources["Ghost"] };
 
     public static Button Secondary(string text) => new() { Content = text };
+
+    /// <summary>Square icon button using Segoe Fluent Icons glyphs (e.g. \uE72C refresh, \uE713 settings).</summary>
+    public static Button IconButton(string glyph, string tooltip)
+    {
+        var b = new Button
+        {
+            Content = glyph, ToolTip = tooltip, Width = 38, Height = 36, Padding = new Thickness(0), Margin = new Thickness(0, 0, 8, 0),
+            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 15,
+        };
+        return b;
+    }
 }

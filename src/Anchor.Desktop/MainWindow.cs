@@ -19,6 +19,7 @@ public sealed class MainWindow : Window
     readonly StackPanel _agenda = new();
     readonly StackPanel _tasks = new();
     readonly TextBlock _plan = new() { FontSize = 13.5, LineHeight = 21 };
+    readonly TextBlock _planWhen = new() { FontSize = 11.5, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 8, 0, 0) };
     readonly WrapPanel _problems = new() { Margin = new Thickness(0, 14, 0, 0) };
     readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
     readonly Button _planBtn = Ui.Primary("Plan my day");
@@ -57,12 +58,19 @@ public sealed class MainWindow : Window
         var where = Ui.Primary("Where was I?");
         where.ToolTip = $"Global hotkey: {_engine.Settings.Hotkey}";
         where.Click += (_, _) => new RecoveryWindow(_engine, false).Show();
-        var refresh = Ui.Secondary("Refresh");
+        var ask = Ui.Secondary("Ask Claude  ▾");
+        ask.Click += (_, _) => Ui.ShowMenu(ask,
+            ("Plan my day in Claude", () => Ask(ClaudeAsk.PlanDay)),
+            ("Triage my inbox in Claude", () => Ask(ClaudeAsk.TriageInbox)),
+            ("Where was I? (quick chat)", () => Ask(ClaudeAsk.WhereWasI)),
+            ("", null),
+            ("Open a new Claude chat", () => Ask(ClaudeAsk.NewChat)));
+        var refresh = Ui.IconButton("\uE72C", "Refresh calendars and mail now");
         refresh.Click += (_, _) => _ = _engine.RefreshAllAsync(forceMessages: true);
-        var settings = Ui.Secondary("Settings");
+        var settings = Ui.IconButton("\uE713", "Settings");
         settings.Click += (_, _) => new SettingsWindow(_engine).Show();
         settings.Margin = new Thickness(0);
-        actions.Children.Add(where); actions.Children.Add(refresh); actions.Children.Add(settings);
+        actions.Children.Add(where); actions.Children.Add(ask); actions.Children.Add(refresh); actions.Children.Add(settings);
         DockPanel.SetDock(actions, Dock.Right);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(actions, true);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(_chips, true);
@@ -106,7 +114,7 @@ public sealed class MainWindow : Window
         planHead.Children.Add(_planBtn);
         planHead.Children.Add(planLabel);
         var planBody = new ScrollViewer { MaxHeight = 150, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
-        var planCard = Ui.Card(new StackPanel { Children = { planHead, planBody } });
+        var planCard = Ui.Card(new StackPanel { Children = { planHead, planBody, _planWhen } });
         Grid.SetRow(planCard, 3);
         root.Children.Add(planCard);
 
@@ -121,6 +129,16 @@ public sealed class MainWindow : Window
         _clock.Start();
         Closing += (_, e) => { if (App.Exiting) { _clock.Stop(); return; } e.Cancel = true; Hide(); }; // lives in the tray
         Render();
+    }
+
+    void Ask(ClaudeAsk what)
+    {
+        try
+        {
+            if (what == ClaudeAsk.NewChat) ClaudeDesktop.Launch("claude://claude.ai/new?surface=chat");
+            else _engine.AskClaude(what);
+        }
+        catch (Exception ex) { MessageBox.Show("Couldn't open Claude desktop: " + ex.Message, "Anchor"); }
     }
 
     static UIElement Scroll(string label, Panel body)
@@ -181,13 +199,13 @@ public sealed class MainWindow : Window
         {
             var name = char.ToUpper(p[0]) + p[1..];
             var ok = _engine.IsConnected(p);
-            var chip = Ui.Chip(ok ? name : $"Connect {name}", ok ? "ok" : "warn", ok ? "●" : "○");
+            var chip = Ui.Chip(name, ok ? "ok" : "warn", ok ? "●" : "○");
+            chip.ToolTip = ok ? "Connected" : $"Not connected. Click to connect {name}.";
             if (!ok)
             {
                 chip.Cursor = Cursors.Hand;
                 chip.MouseLeftButtonUp += async (_, _) => await ConnectAsync(p);
             }
-            else chip.ToolTip = "Connected. Click Settings to change.";
             _chips.Children.Add(chip);
         }
         if (!_engine.Providers.Any())
@@ -198,7 +216,7 @@ public sealed class MainWindow : Window
         }
         _chips.Children.Add(_engine.Claude is null
             ? Ui.Chip("AI off", "neutral", "✦")
-            : Ui.Chip(_engine.Budget.Summary.Replace("AI spend: ", ""), _engine.Budget.CutOff ? "alarm" : _engine.Budget.Warn ? "warn" : "accent", "✦"));
+            : Ui.Chip($"${_engine.Budget.SpentToday:0.00} today", _engine.Budget.CutOff ? "alarm" : _engine.Budget.Warn ? "warn" : "accent", "✦"));
     }
 
     async Task ConnectAsync(string provider)
@@ -269,8 +287,16 @@ public sealed class MainWindow : Window
     void RenderPlan()
     {
         var st = _engine.Store.State;
-        var text = _planOverride.Length > 0 ? _planOverride : st.LastPlan ?? "";
-        if (text.Length > 0) { _plan.Text = text; _plan.Foreground = Ui.B("Fg"); return; }
+        // Newest of: live API result this session, API plan, or a plan.md dropped by Claude desktop.
+        var fromClaude = st.BridgePlan is { Length: > 0 } && (st.BridgePlanAt ?? DateTimeOffset.MinValue) >= (st.LastPlanAt ?? DateTimeOffset.MinValue);
+        var text = _planOverride.Length > 0 ? _planOverride : fromClaude ? st.BridgePlan! : st.LastPlan ?? "";
+        if (text.Length > 0)
+        {
+            _plan.Text = text; _plan.Foreground = Ui.B("Fg");
+            _planWhen.Text = _planOverride.Length > 0 ? "" : fromClaude ? $"From Claude desktop · {Fmt.Time(st.BridgePlanAt!.Value)}" : st.LastPlanAt is { } t ? $"Anchor AI · {Fmt.Time(t)}" : "";
+            return;
+        }
+        _planWhen.Text = "";
         _plan.Foreground = Ui.B("Dim");
         _plan.Text = _engine.Claude is null
             ? "Add your Anthropic API key in Settings to get an AI plan built around your meetings."
@@ -307,7 +333,7 @@ public sealed class MainWindow : Window
             b.Click += (_, _) => act();
             btns.Children.Add(b);
         }
-        if (t.Link is { Length: > 0 } link) Add("Open", () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }), accent: true);
+        if (Bridge.SafeLink(t.Link) is { } link) Add("Open", () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }), accent: true);
         Add("Doing now", () => { _engine.SetCurrentTask(t.Title); Render(); });
         if (t.Status == SuggestionStatus.Pending) Add("Keep", () => { _engine.SetStatus(t.Id, SuggestionStatus.Accepted); Render(); });
         Add("Done", () => { _engine.SetStatus(t.Id, SuggestionStatus.Done); Render(); });

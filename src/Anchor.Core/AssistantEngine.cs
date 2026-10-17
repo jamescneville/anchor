@@ -22,6 +22,8 @@ public sealed class AssistantEngine : IDisposable
     DateTimeOffset _lastMessageRefresh = DateTimeOffset.MinValue;
     DateTimeOffset _lastCheckIn = DateTimeOffset.Now;
     bool _refreshing;
+    FileSystemWatcher? _bridgeWatcher;
+    Timer? _bridgeDebounce;
     readonly List<CalendarEvent> _testEvents = new();
 
     public StateStore Store { get; }
@@ -128,7 +130,56 @@ public sealed class AssistantEngine : IDisposable
 
     // ---------------------------------------------------------------- loop
 
-    public void Start() => _ = Task.Run(LoopAsync);
+    public void Start()
+    {
+        StartBridge();
+        _ = Task.Run(LoopAsync);
+    }
+
+    // ---------------------------------------------------------------- Claude desktop bridge
+
+    void StartBridge()
+    {
+        try
+        {
+            IngestBridge();
+            _bridgeWatcher = new FileSystemWatcher(Bridge.Dir) { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size, EnableRaisingEvents = true };
+            void Kick(object? _, FileSystemEventArgs __) => _bridgeDebounce?.Change(700, Timeout.Infinite);
+            _bridgeDebounce = new Timer(_ => IngestBridge(), null, Timeout.Infinite, Timeout.Infinite);
+            _bridgeWatcher.Created += Kick; _bridgeWatcher.Changed += Kick; _bridgeWatcher.Renamed += (s, e) => Kick(s, e);
+        }
+        catch (Exception ex) { SourceErrors["Claude bridge"] = ex.Message; }
+    }
+
+    /// <summary>Reads plan.md and tasks.json written by Claude desktop. Existing tasks keep their status.</summary>
+    public void IngestBridge()
+    {
+        try
+        {
+            var plan = Bridge.ReadPlan(Bridge.Dir, out var at);
+            var tasks = Bridge.ReadTasks(Bridge.Dir, DateTimeOffset.Now);
+            var changed = false;
+            Store.Mutate(s =>
+            {
+                if (plan is not null && (plan != s.BridgePlan || at != s.BridgePlanAt)) { s.BridgePlan = plan; s.BridgePlanAt = at; changed = true; }
+                foreach (var t in tasks.Where(t => s.Tasks.All(x => x.Id != t.Id))) { s.Tasks.Add(t); changed = true; }
+            });
+            SourceErrors.Remove("Claude bridge");
+            if (changed) Changed?.Invoke();
+        }
+        catch (Exception ex) { SourceErrors["Claude bridge"] = ex.Message; }
+    }
+
+    /// <summary>Opens Claude desktop with a ready-to-send prompt (you press Enter there).</summary>
+    public void AskClaude(ClaudeAsk ask)
+    {
+        var cd = _settings.ClaudeDesktop;
+        var now = DateTimeOffset.Now;
+        var events = AiPrivacy.Events(Store.State.CachedEvents, cd.IncludeWorkContext, WorkIcsSources);
+        var tasks = AiPrivacy.Tasks(Store.State.Tasks, cd.IncludeWorkContext, WorkIcsSources);
+        var prompt = ClaudeDesktop.BuildPrompt(ask, Store.State, now, events, tasks);
+        ClaudeDesktop.Launch(ClaudeDesktop.Url(ask, prompt, Bridge.Dir));
+    }
 
     async Task LoopAsync()
     {
@@ -421,6 +472,8 @@ public sealed class AssistantEngine : IDisposable
 
     public void Dispose()
     {
+        _bridgeWatcher?.Dispose();
+        _bridgeDebounce?.Dispose();
         _cts.Cancel();
         _http.Dispose();
     }

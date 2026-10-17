@@ -47,6 +47,14 @@ public sealed class SettingsWindow : Window
         Field("Daily soft cap", "USD; limits background triage only", _s.Ai.DailySoftCapUsd.ToString(), v => _s.Ai.DailySoftCapUsd = ParseDouble(v, _s.Ai.DailySoftCapUsd), 90);
         Field("Hard cut-off", "USD; AI stops entirely at this monthly spend", _s.Ai.CutoffUsd.ToString(), v => _s.Ai.CutoffUsd = ParseDouble(v, _s.Ai.CutoffUsd), 90);
 
+        Section("Claude desktop", "“Ask Claude” opens the Claude app with a ready prompt. Results can flow back through the bridge folder.");
+        Toggle("Include work meetings and follow-ups in those prompts", "Goes to your organisation's own Claude account. Turn off to redact work items first.", _s.ClaudeDesktop.IncludeWorkContext, v => _s.ClaudeDesktop.IncludeWorkContext = v);
+        var folder = Ui.Secondary("Open bridge folder");
+        folder.Margin = new Thickness(0);
+        folder.Click += (_, _) => Process.Start(new ProcessStartInfo(Bridge.Dir) { UseShellExecute = true });
+        _section.Children.Add(Row("Bridge folder", "Claude writes plan.md and tasks.json here; Anchor only reads them.", folder));
+        EndSection();
+
         Section("Google", "Gmail and every calendar on the account, including the one Skylight syncs from.");
         Toggle("Enable Google", null, _s.Google.Enabled, v => _s.Google.Enabled = v);
         Field("OAuth client ID", "Ends in .apps.googleusercontent.com", _s.Google.ClientId, v => _s.Google.ClientId = v.Trim());

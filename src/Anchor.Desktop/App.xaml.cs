@@ -109,6 +109,11 @@ public partial class App : Application
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Open Anchor", null, (_, _) => ShowMain());
         menu.Items.Add("Where was I?", null, (_, _) => new RecoveryWindow(_engine!, false).Show());
+        var claude = new System.Windows.Forms.ToolStripMenuItem("Ask Claude");
+        claude.DropDownItems.Add("Plan my day", null, (_, _) => AskClaude(ClaudeAsk.PlanDay));
+        claude.DropDownItems.Add("Triage my inbox", null, (_, _) => AskClaude(ClaudeAsk.TriageInbox));
+        claude.DropDownItems.Add("Where was I?", null, (_, _) => AskClaude(ClaudeAsk.WhereWasI));
+        menu.Items.Add(claude);
         menu.Items.Add("Settings…", null, (_, _) => new SettingsWindow(_engine!).Show());
         menu.Items.Add("Test alert (meeting in 1 min)", null, (_, _) => _engine!.AddTestMeeting(1));
         var startup = new System.Windows.Forms.ToolStripMenuItem("Start with Windows") { Checked = IsAutoStart(), CheckOnClick = true };
@@ -124,6 +129,12 @@ public partial class App : Application
             ContextMenuStrip = menu,
         };
         _tray.DoubleClick += (_, _) => ShowMain();
+    }
+
+    void AskClaude(ClaudeAsk ask)
+    {
+        try { _engine!.AskClaude(ask); }
+        catch (Exception ex) { _tray?.ShowBalloonTip(4000, "Anchor", "Couldn't open Claude desktop: " + ex.Message, System.Windows.Forms.ToolTipIcon.Warning); }
     }
 
     void ShowMain() { _main!.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); }

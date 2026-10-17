@@ -23,6 +23,10 @@ public sealed class AnchorState
     public string LastMorningBrief { get; set; } = "";
     public string LastEveningBrief { get; set; } = "";
 
+    /// <summary>Latest plan.md dropped by Claude desktop into the bridge folder.</summary>
+    public string? BridgePlan { get; set; }
+    public DateTimeOffset? BridgePlanAt { get; set; }
+
     public string? LastPlan { get; set; }
     public DateTimeOffset? LastPlanAt { get; set; }
 }

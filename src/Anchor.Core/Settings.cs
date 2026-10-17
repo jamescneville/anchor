@@ -56,6 +56,16 @@ public sealed class IcsFeed
     public bool IsWork { get; set; } = true;
 }
 
+public sealed class ClaudeDesktopSettings
+{
+    public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Work meeting titles and work follow-ups are included in prompts handed to the Claude desktop app
+    /// (your organisation's own Claude account). Turn off to redact them like the API path does.
+    /// </summary>
+    public bool IncludeWorkContext { get; set; } = true;
+}
+
 public sealed class AiSettings
 {
     public bool Enabled { get; set; } = true;
@@ -104,6 +114,7 @@ public sealed class AnchorSettings
     public SlackSettings Slack { get; set; } = new();
     public List<IcsFeed> IcsFeeds { get; set; } = new();
     public AiSettings Ai { get; set; } = new();
+    public ClaudeDesktopSettings ClaudeDesktop { get; set; } = new();
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, ReadCommentHandling = JsonCommentHandling.Skip };
 
