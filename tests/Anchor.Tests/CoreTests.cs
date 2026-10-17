@@ -473,7 +473,7 @@ public class UsageAndCostTests
     public void Event_link_is_kept_only_for_web_urls()
     {
         var now = new DateTimeOffset(2026, 10, 19, 9, 0, 0, TimeSpan.FromHours(-4));
-        var ev = Bridge.ParseEvents("[{\"id\":\"a\",\"title\":\"X\",\"start\":\"2026-10-19T13:00:00-04:00\",\"link\":\"https://outlook.office365.com/owa/?itemid=1\"},{\"id\":\"b\",\"title\":\"Y\",\"start\":\"2026-10-19T14:00:00-04:00\",\"link\":\"file:///c:/x\"}]", now);
+        var ev = Bridge.ParseEvents("[{\"id\":\"a\",\"title\":\"X\",\"start\":\"2026-10-19T13:00:00-04:00\",\"link\":\"https://outlook.office365.com/owa/?itemid=1&path=/calendar/item\"},{\"id\":\"b\",\"title\":\"Y\",\"start\":\"2026-10-19T14:00:00-04:00\",\"link\":\"file:///c:/x\"}]", now);
         Assert.StartsWith("https://outlook.office365.com", ev[0].OpenUrl);
         Assert.Null(ev[1].OpenUrl);
     }
@@ -575,5 +575,40 @@ public class CalendarPrefsTests
     {
         using var doc = System.Text.Json.JsonDocument.Parse("{\"id\":\"1\",\"summary\":\"Practice\",\"start\":{\"dateTime\":\"2026-10-19T16:30:00-04:00\"},\"end\":{\"dateTime\":\"2026-10-19T17:30:00-04:00\"}}");
         Assert.Equal("#9A9CFF", GoogleCalendarSource.Parse(doc.RootElement, "Google/Family", "#9A9CFF")!.Color);
+    }
+}
+
+public class OutlookLinkTests
+{
+    const string Id = "AAMkADc5MzE4MDcw+/YBwD+Vyi47TwNT7x0hIkuw4vIAAAAu8SiAABzCatbQjloTohk082C4tPjAAj9f61iAAA=";
+
+    [Fact]
+    public void Graph_message_weblinks_become_deeplinks_with_the_id_preserved()
+    {
+        var webLink = "https://outlook.office365.com/owa/?ItemID=" + Uri.EscapeDataString(Id) + "&exvsurl=1&viewmodel=ReadMessageItem";
+        var r = OutlookLinks.Normalize(webLink);
+        var e = Uri.EscapeDataString(Id);
+        Assert.Equal($"https://outlook.office.com/mail/deeplink/read/{e}?ItemID={e}&exvsurl=1", r);
+        Assert.Equal(Id, System.Web.HttpUtility.ParseQueryString(new Uri(r).Query)["ItemID"]);   // round-trips exactly
+    }
+
+    [Fact]
+    public void Lowercase_itemid_works_too() =>
+        Assert.StartsWith("https://outlook.office.com/mail/deeplink/read/", OutlookLinks.Normalize("https://outlook.office365.com/owa/?itemid=" + Uri.EscapeDataString(Id) + "&exvsurl=1"));
+
+    [Fact]
+    public void Calendar_and_non_outlook_links_are_left_alone()
+    {
+        var cal = "https://outlook.office365.com/owa/?itemid=" + Uri.EscapeDataString(Id) + "&exvsurl=1&path=/calendar/item";
+        Assert.Equal(cal, OutlookLinks.Normalize(cal));
+        Assert.Equal("https://teams.microsoft.com/l/message/x", OutlookLinks.Normalize("https://teams.microsoft.com/l/message/x"));
+        Assert.Equal("https://mail.google.com/mail/u/0/#inbox/abc", OutlookLinks.Normalize("https://mail.google.com/mail/u/0/#inbox/abc"));
+    }
+
+    [Fact]
+    public void SafeLink_applies_the_rewrite_and_still_rejects_other_schemes()
+    {
+        Assert.StartsWith("https://outlook.office.com/mail/deeplink/read/", Bridge.SafeLink("https://outlook.office365.com/owa/?ItemID=" + Uri.EscapeDataString(Id) + "&exvsurl=1&viewmodel=ReadMessageItem"));
+        Assert.Null(Bridge.SafeLink("file:///c:/x"));
     }
 }

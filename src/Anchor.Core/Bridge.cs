@@ -183,7 +183,7 @@ public static class Bridge
 
     /// <summary>Only plain web links may be opened from bridge data (never file:, custom protocols, etc.).</summary>
     public static string? SafeLink(string? link) =>
-        Uri.TryCreate(link, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp) ? u.AbsoluteUri : null;
+        Uri.TryCreate(link, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp) ? OutlookLinks.Normalize(u.AbsoluteUri) : null;
 
     static string Str(JsonElement e, string name, int max)
     {
