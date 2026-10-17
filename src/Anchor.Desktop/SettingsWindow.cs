@@ -115,6 +115,8 @@ public sealed class SettingsWindow : Window
             foreach (var a in _apply) a();
             if (!TimeOnly.TryParse(_s.WorkdayStart, out _) || !TimeOnly.TryParse(_s.WorkdayEnd, out _))
                 throw new FormatException("Workday start and end must look like 08:30.");
+            var problems = SettingsValidator.Check(_s);
+            if (problems.Count > 0) throw new FormatException(string.Join(Environment.NewLine + Environment.NewLine, problems));
             _s.Save();
         }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Anchor settings"); return; }

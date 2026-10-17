@@ -369,3 +369,24 @@ public class ClaudeCliTests
         finally { File.Delete(f); }
     }
 }
+
+public class SettingsValidatorTests
+{
+    static AnchorSettings Ms(string id, string tenant = "organizations") =>
+        new() { Microsoft = { Enabled = true, ClientId = id, Tenant = tenant } };
+
+    [Fact] public void Email_in_the_client_id_field_is_rejected() => Assert.Contains(SettingsValidator.Check(Ms("james.neville@autodesk.com")), p => p.StartsWith("Microsoft: the Application"));
+    [Fact] public void A_real_guid_passes() => Assert.Empty(SettingsValidator.Check(Ms("0a1b2c3d-4e5f-6789-abcd-ef0123456789")));
+    [Fact] public void A_tenant_guid_passes() => Assert.Empty(SettingsValidator.Check(Ms("0a1b2c3d-4e5f-6789-abcd-ef0123456789", "11111111-2222-3333-4444-555555555555")));
+    [Fact] public void A_bad_tenant_is_rejected() => Assert.Contains(SettingsValidator.Check(Ms("0a1b2c3d-4e5f-6789-abcd-ef0123456789", "autodesk.com")), p => p.Contains("Tenant must"));
+    [Fact] public void Disabled_connectors_are_not_validated() => Assert.Empty(SettingsValidator.Check(new AnchorSettings { Microsoft = { ClientId = "garbage" } }));
+
+    [Fact]
+    public void Google_values_are_checked()
+    {
+        var bad = new AnchorSettings { Google = { Enabled = true, ClientId = "slimjim", ClientSecret = "hunter2" } };
+        Assert.Equal(2, SettingsValidator.Check(bad).Count);
+        var good = new AnchorSettings { Google = { Enabled = true, ClientId = "123456789-abc123def.apps.googleusercontent.com", ClientSecret = "GOCSPX-abc" } };
+        Assert.Empty(SettingsValidator.Check(good));
+    }
+}
