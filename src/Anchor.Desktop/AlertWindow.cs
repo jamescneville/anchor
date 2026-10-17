@@ -34,57 +34,70 @@ public sealed class AlertWindow : Window
         ShowInTaskbar = true;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
+        AllowsTransparency = true;          // rounded card with a soft shadow
+        Background = Brushes.Transparent;
         SizeToContent = SizeToContent.WidthAndHeight;
-        MinWidth = big ? 560 : 380;
-        Background = (Brush)Application.Current.Resources["Card"];
         WindowStartupLocation = big ? WindowStartupLocation.CenterScreen : WindowStartupLocation.Manual;
         Title = "Anchor: " + e.Title;
 
         var urgent = alert.OffsetMinutes <= 1;
-        var border = new Border
-        {
-            BorderThickness = new Thickness(big ? 4 : 2),
-            BorderBrush = (Brush)Application.Current.Resources[urgent ? "Alarm" : "Accent"],
-            Padding = new Thickness(big ? 32 : 18),
-        };
-        var stack = new StackPanel();
-        border.Child = stack;
+        var tone = Ui.B(urgent ? "Alarm" : "Accent");
+        var soft = Ui.B(urgent ? "AlarmSoft" : "AccentSoft");
 
-        stack.Children.Add(new TextBlock { Text = e.Title, FontSize = big ? 30 : 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 8) });
+        var stack = new StackPanel { MinWidth = big ? 520 : 340 };
+        var chip = Ui.Chip(alert.OffsetMinutes == 0 ? "STARTING" : "MEETING", urgent ? "alarm" : "accent");
+        chip.HorizontalAlignment = HorizontalAlignment.Left;
+        chip.Margin = new Thickness(0, 0, 0, big ? 16 : 10);
+        stack.Children.Add(chip);
+        stack.Children.Add(new TextBlock
+        {
+            Text = e.Title, FontSize = big ? 32 : 19, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6),
+            FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"],
+        });
         _when.FontSize = big ? 22 : 15;
-        _when.Foreground = (Brush)Application.Current.Resources[urgent ? "Alarm" : "Accent"];
+        _when.FontWeight = FontWeights.SemiBold;
+        _when.Foreground = tone;
         stack.Children.Add(_when);
         stack.Children.Add(new TextBlock
         {
             Text = $"{e.Start.LocalDateTime:HH:mm}–{e.End.LocalDateTime:HH:mm}  ·  {e.Source}" + (e.Location is { Length: > 0 } l && !l.StartsWith("http") ? $"  ·  {l}" : ""),
-            Foreground = (Brush)Application.Current.Resources["Dim"], Margin = new Thickness(0, 6, 0, 18),
+            Foreground = Ui.B("Dim"), Margin = new Thickness(0, 8, 0, big ? 24 : 14),
         });
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         if (e.JoinUrl is { Length: > 0 } url)
         {
-            var join = Btn("Join meeting", big);
-            join.Background = (Brush)Application.Current.Resources["Accent"];
-            join.Foreground = Brushes.Black;
+            var join = Ui.Primary("Join meeting", big ? 24 : 14, big ? 12 : 7);
+            join.FontSize = big ? 16 : 13;
             join.Click += (_, _) => { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); Resolve(ack: true); };
             buttons.Children.Add(join);
         }
-        var snooze = Btn($"Snooze {_engine.Settings.SnoozeMinutes} min", big);
+        var snooze = Ui.Secondary($"Snooze {_engine.Settings.SnoozeMinutes} min");
+        snooze.Padding = new Thickness(big ? 20 : 12, big ? 12 : 7, big ? 20 : 12, big ? 12 : 7);
+        snooze.FontSize = big ? 16 : 13;
         snooze.Click += (_, _) => Resolve(ack: false);
-        var ok = Btn("Got it", big);
+        var ok = Ui.Secondary("Got it");
+        ok.Padding = snooze.Padding; ok.FontSize = snooze.FontSize; ok.Margin = new Thickness(0);
         ok.Click += (_, _) => Resolve(ack: true);
         buttons.Children.Add(snooze);
         buttons.Children.Add(ok);
         stack.Children.Add(buttons);
-        Content = border;
+
+        var card = new Border
+        {
+            Background = Ui.B("Card"), BorderBrush = tone, BorderThickness = new Thickness(urgent ? 2 : 1),
+            CornerRadius = new CornerRadius(big ? 22 : 16), Padding = new Thickness(big ? 36 : 22), Child = stack,
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 36, ShadowDepth = 0, Opacity = 0.65, Color = Colors.Black },
+        };
+        Content = new Border { Padding = new Thickness(28), Child = card };   // room for the shadow
 
         Loaded += (_, _) =>
         {
             if (!big)
             {
                 var wa = SystemParameters.WorkArea;
-                Left = wa.Right - ActualWidth - 16;
-                Top = wa.Bottom - ActualHeight - 16;
+                Left = wa.Right - ActualWidth + 4;
+                Top = wa.Bottom - ActualHeight + 4;
             }
             Refresh();
             Notify();
@@ -96,13 +109,12 @@ public sealed class AlertWindow : Window
         Closed += (_, _) => { _clock.Stop(); if (!_resolved) _engine.Snooze(_alert, _engine.Settings.SnoozeMinutes); };
     }
 
-    static Button Btn(string text, bool big) => new() { Content = text, FontSize = big ? 17 : 13, Padding = new Thickness(big ? 20 : 12, big ? 12 : 6, big ? 20 : 12, big ? 12 : 6) };
 
     void Refresh()
     {
         var now = DateTimeOffset.Now;
         _when.Text = AlertScheduler.Describe(_alert.Event, now);
-        if (_alert.Event.Start <= now) _when.Foreground = (Brush)Application.Current.Resources["Alarm"];
+        if (_alert.Event.Start <= now) _when.Foreground = Ui.B("Alarm");
     }
 
     void Notify()

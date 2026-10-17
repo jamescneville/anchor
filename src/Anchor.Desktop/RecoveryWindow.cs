@@ -10,8 +10,8 @@ namespace Anchor.Desktop;
 public sealed class RecoveryWindow : Window
 {
     readonly AssistantEngine _engine;
-    readonly TextBlock _local = new() { FontSize = 15, Margin = new Thickness(0, 0, 0, 12) };
-    readonly TextBlock _ai = new() { FontSize = 15, Foreground = (Brush)Application.Current.Resources["Accent"], Margin = new Thickness(0, 0, 0, 12) };
+    readonly TextBlock _local = new() { FontSize = 14.5, LineHeight = 22, Margin = new Thickness(0, 0, 0, 14) };
+    readonly TextBlock _ai = new() { FontSize = 14.5, LineHeight = 22, Foreground = (Brush)Application.Current.Resources["Accent"], Margin = new Thickness(0, 0, 0, 14) };
     readonly TextBox _task = new() { Margin = new Thickness(0, 0, 0, 8) };
     readonly bool _checkIn;
 
@@ -25,13 +25,13 @@ public sealed class RecoveryWindow : Window
         SizeToContent = SizeToContent.Height;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ResizeMode = ResizeMode.NoResize;
-        Background = (Brush)Application.Current.Resources["Card"];
+        Ui.Style(this);
 
-        var st = new StackPanel { Margin = new Thickness(24) };
+        var st = new StackPanel { Margin = new Thickness(26) };
         st.Children.Add(new TextBlock
         {
             Text = checkIn ? "Still on track?" : "Where was I?",
-            FontSize = 24, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 12),
+            FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"], Margin = new Thickness(0, 0, 0, 14),
         });
         st.Children.Add(_local);
         st.Children.Add(_ai);
@@ -39,11 +39,11 @@ public sealed class RecoveryWindow : Window
         st.Children.Add(_task);
 
         var row = new StackPanel { Orientation = Orientation.Horizontal };
-        var save = new Button { Content = checkIn ? "Yes, continuing" : "Set & go" };
+        var save = Ui.Primary(checkIn ? "Yes, continuing" : "Set & go");
         save.Click += (_, _) => Commit();
-        var note = new Button { Content = "Save as note" };
+        var note = Ui.Secondary("Save as note");
         note.Click += (_, _) => { if (_task.Text.Trim().Length > 0) _engine.SaveCheckpoint(_task.Text.Trim()); Refresh(); };
-        var close = new Button { Content = "Close" };
+        var close = Ui.Secondary("Close");
         close.Click += (_, _) => Close();
         row.Children.Add(save); row.Children.Add(note); row.Children.Add(close);
         st.Children.Add(row);

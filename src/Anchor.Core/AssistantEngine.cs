@@ -385,7 +385,8 @@ public sealed class AssistantEngine : IDisposable
     {
         var now = DateTimeOffset.Now;
         var st = Store.State;
-        var next = AlertScheduler.NextEvent(st.CachedEvents, now);
+        var live = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
+        var next = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
         var lines = new List<string>
         {
             st.CurrentTask.Length > 0
@@ -393,6 +394,7 @@ public sealed class AssistantEngine : IDisposable
                 : "No current task set. Pick one thing and type it below.",
         };
         if (st.Checkpoint.Length > 0) lines.Add($"Last note ({st.CheckpointAt?.LocalDateTime:HH:mm}): {st.Checkpoint}");
+        if (live is not null) lines.Add($"In progress: {live.Title} (ends {live.End.LocalDateTime:HH:mm}).");
         lines.Add(next is null ? "No more meetings on the calendar." : $"Next: {next.Title} {AlertScheduler.Describe(next, now)} ({next.Start.LocalDateTime:HH:mm}).");
         var overdue = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted && t.Due is { } d && d < now).ToList();
         if (overdue.Count > 0) lines.Add($"Overdue: {string.Join("; ", overdue.Take(3).Select(t => t.Title))}");

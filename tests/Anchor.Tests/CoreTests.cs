@@ -72,6 +72,14 @@ public class AlertSchedulerTests
         Assert.Equal(15, Assert.Single(later).OffsetMinutes); // key includes start time, so it fires afresh
     }
 
+    [Theory]
+    [InlineData(30, "starts in 30 min")]
+    [InlineData(1340, "starts in 22h 20m")]
+    [InlineData(0, "is starting NOW")]
+    [InlineData(-5, "started 5 min ago")]
+    public void Describe_reads_naturally(int startsInMin, string expected) =>
+        Assert.Equal(expected, AlertScheduler.Describe(Meeting(startsInMin), T0));
+
     [Fact]
     public void Dedupe_merges_the_same_meeting_from_two_calendars_and_keeps_the_join_link()
     {

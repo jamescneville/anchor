@@ -60,6 +60,10 @@ public partial class App : Application
         _engine.Start();
 
         if (!e.Args.Contains("--background")) _main.Show();
+        if (e.Args.Contains("--test-alert")) _engine.AddTestMeeting(1);
+        if (e.Args.Contains("--recovery")) new RecoveryWindow(_engine, false).Show();
+        if (e.Args.Contains("--brief")) new BriefWindow(_engine, "morning").Show();
+        if (e.Args.Contains("--settings")) new SettingsWindow(_engine).Show();
         if (settings.Google is { Enabled: false } && settings.Microsoft is { Enabled: false } && settings.IcsFeeds.Count == 0)
             new SettingsWindow(_engine).Show(); // first run: nothing connected yet
     }

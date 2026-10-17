@@ -1,88 +1,106 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Anchor.Core;
-using Anchor.Core.Connectors;
 
 namespace Anchor.Desktop;
 
 public sealed class MainWindow : Window
 {
     readonly AssistantEngine _engine;
-    readonly TextBlock _now = new() { FontSize = 22, FontWeight = FontWeights.Bold };
-    readonly TextBlock _next = new() { FontSize = 16, Margin = new Thickness(0, 4, 0, 0) };
+    readonly TextBlock _date = new() { FontSize = 12, Foreground = Ui.B("Dim") };
+    readonly WrapPanel _chips = new() { VerticalAlignment = VerticalAlignment.Center };
+    readonly TextBlock _now = new() { FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] };
+    readonly TextBlock _inProgress = new() { FontSize = 13, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 6, 0, 0) };
+    readonly TextBlock _next = new() { FontSize = 15, Margin = new Thickness(0, 4, 0, 0) };
     readonly StackPanel _agenda = new();
     readonly StackPanel _tasks = new();
-    readonly TextBox _plan = new() { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, MinHeight = 120, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-    readonly TextBlock _status = new() { FontSize = 12, Foreground = (Brush)Application.Current.Resources["Dim"] };
+    readonly TextBlock _plan = new() { FontSize = 13.5, LineHeight = 21 };
+    readonly WrapPanel _problems = new() { Margin = new Thickness(0, 14, 0, 0) };
     readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
+    readonly Button _planBtn = Ui.Primary("Plan my day");
+    string _planOverride = "";
 
     public MainWindow(AssistantEngine engine)
     {
         _engine = engine;
         Title = "Anchor";
-        Width = 980; Height = 760;
-        Background = (Brush)Application.Current.Resources["Bg"];
+        Width = 1080; Height = 800; MinWidth = 820; MinHeight = 600;
+        Ui.Style(this);
 
-        var root = new Grid { Margin = new Thickness(20) };
+        var root = new Grid { Margin = new Thickness(26, 20, 26, 20) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // Right now
-        var hero = Card(new StackPanel { Children = { Label("RIGHT NOW"), _now, _next } });
-        Grid.SetRow(hero, 0);
-        root.Children.Add(hero);
+        // Header: title + source chips on the left, actions on the right
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 16), LastChildFill = false };
+        var titleBox = new StackPanel { Margin = new Thickness(0, 0, 22, 0) };
+        titleBox.Children.Add(new TextBlock { Text = "Anchor", FontSize = 22, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
+        titleBox.Children.Add(_date);
+        DockPanel.SetDock(titleBox, Dock.Left);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var where = Ui.Primary("Where was I?");
+        where.ToolTip = $"Global hotkey: {_engine.Settings.Hotkey}";
+        where.Click += (_, _) => new RecoveryWindow(_engine, false).Show();
+        var refresh = Ui.Secondary("Refresh");
+        refresh.Click += (_, _) => _ = _engine.RefreshAllAsync(forceMessages: true);
+        var settings = Ui.Secondary("Settings");
+        settings.Click += (_, _) => new SettingsWindow(_engine).Show();
+        settings.Margin = new Thickness(0);
+        actions.Children.Add(where); actions.Children.Add(refresh); actions.Children.Add(settings);
+        DockPanel.SetDock(actions, Dock.Right);
+        header.Children.Add(titleBox);
+        header.Children.Add(actions);
+        header.Children.Add(_chips);
+        Grid.SetRow(header, 0);
+        root.Children.Add(header);
 
-        // Today + needs attention
-        var cols = new Grid { Margin = new Thickness(0, 12, 0, 12) };
+        // Hero: what am I doing right now
+        var hero = new StackPanel { Children = { Ui.Label("Right now"), _now, _inProgress, _next } };
+        var heroCard = Ui.Card(hero, 22);
+        heroCard.Background = Ui.B("CardRaised");
+        Grid.SetRow(heroCard, 1);
+        root.Children.Add(heroCard);
+
+        // Agenda + attention
+        var cols = new Grid { Margin = new Thickness(0, 14, 0, 14) };
         cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
-        cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
-        var left = Card(new DockPanel { Children = { Docked(Label("TODAY & TOMORROW"), Dock.Top), new ScrollViewer { Content = _agenda, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } } });
-        var right = Card(new DockPanel { Children = { Docked(Label("NEEDS ATTENTION"), Dock.Top), new ScrollViewer { Content = _tasks, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } } });
+        cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+        var left = Ui.Card(Scroll("Agenda", _agenda));
+        var right = Ui.Card(Scroll("Needs attention", _tasks));
         Grid.SetColumn(left, 0); Grid.SetColumn(right, 2);
         cols.Children.Add(left); cols.Children.Add(right);
-        Grid.SetRow(cols, 1);
+        Grid.SetRow(cols, 2);
         root.Children.Add(cols);
 
         // Plan
-        var planBtn = new Button { Content = "Plan my day" };
-        planBtn.Click += async (_, _) =>
+        _planBtn.Margin = new Thickness(0);
+        _planBtn.Click += async (_, _) =>
         {
-            planBtn.IsEnabled = false; _plan.Text = "Planning…";
-            try { _plan.Text = await _engine.PlanDayAsync(); }
-            catch (Exception ex) { _plan.Text = "Could not plan: " + ex.Message; }
-            planBtn.IsEnabled = true; RenderStatus();
+            _planBtn.IsEnabled = false; _planOverride = "Planning…"; RenderPlan();
+            try { _planOverride = await _engine.PlanDayAsync(); }
+            catch (Exception ex) { _planOverride = "Could not plan: " + ex.Message; }
+            _planBtn.IsEnabled = true; RenderPlan(); RenderChips();
         };
-        var plan = Card(new StackPanel { Children = { Label("PLAN"), _plan, new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0), Children = { planBtn } } } });
-        Grid.SetRow(plan, 2);
-        root.Children.Add(plan);
+        var planHead = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var planLabel = Ui.Label("Plan"); planLabel.Margin = new Thickness(0); planLabel.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(_planBtn, Dock.Right);
+        planHead.Children.Add(_planBtn);
+        planHead.Children.Add(planLabel);
+        var planBody = new ScrollViewer { MaxHeight = 150, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
+        var planCard = Ui.Card(new StackPanel { Children = { planHead, planBody } });
+        Grid.SetRow(planCard, 3);
+        root.Children.Add(planCard);
 
-        // Toolbar
-        var bar = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-        bar.Children.Add(Tool($"Where was I?  ({_engine.Settings.Hotkey})", () => new RecoveryWindow(_engine, false).Show()));
-        bar.Children.Add(Tool("Refresh now", () => _ = _engine.RefreshAllAsync(forceMessages: true)));
-        foreach (var p in _engine.Providers)
-        {
-            var provider = p;
-            bar.Children.Add(Tool($"{(_engine.IsConnected(provider) ? "Reconnect" : "Connect")} {provider}", async () =>
-            {
-                try { await _engine.ConnectAsync(provider, CancellationToken.None); await _engine.RefreshAllAsync(true); }
-                catch (Exception ex) { MessageBox.Show(ex.Message, "Anchor"); }
-                Render();
-            }));
-        }
-        bar.Children.Add(Tool("Settings", () => new SettingsWindow(_engine).Show()));
-        bar.Children.Add(_status);
-        _status.VerticalAlignment = VerticalAlignment.Center;
-        var barHost = new StackPanel { Children = { bar } };
-        Grid.SetRow(barHost, 3);
-        root.Children.Add(barHost);
-
+        Grid.SetRow(_problems, 4);
+        root.Children.Add(_problems);
         Content = root;
 
         _engine.Changed += () => Dispatcher.BeginInvoke(Render);
@@ -92,93 +110,219 @@ public sealed class MainWindow : Window
         Render();
     }
 
+    static UIElement Scroll(string label, Panel body)
+    {
+        var dock = new DockPanel();
+        var l = Ui.Label(label);
+        DockPanel.SetDock(l, Dock.Top);
+        dock.Children.Add(l);
+        dock.Children.Add(new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        return dock;
+    }
+
+    // ------------------------------------------------------------------ rendering
+
     void RenderNow()
     {
         var st = _engine.Store.State;
         var now = DateTimeOffset.Now;
-        _now.Text = st.CurrentTask.Length > 0 ? st.CurrentTask : $"No task set. Press {_engine.Settings.Hotkey} and pick one thing.";
-        var next = AlertScheduler.NextEvent(st.CachedEvents, now);
-        _next.Text = next is null ? "No upcoming meetings." : $"Next: {next.Title}, {AlertScheduler.Describe(next, now)} ({next.Start.LocalDateTime:HH:mm})";
-        _next.Foreground = next is not null && next.Start - now < TimeSpan.FromMinutes(5)
-            ? (Brush)Application.Current.Resources["Alarm"] : (Brush)Application.Current.Resources["Fg"];
+        _date.Text = now.LocalDateTime.ToString("dddd, d MMMM") + (st.EventsRefreshed is { } r ? $"  ·  synced {r.LocalDateTime:HH:mm}" : "  ·  not synced yet");
+
+        var hasTask = st.CurrentTask.Length > 0;
+        _now.Text = hasTask ? st.CurrentTask : "Nothing picked";
+        _now.Foreground = hasTask ? Ui.B("Fg") : Ui.B("Dim");
+
+        var live = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start <= now && e.End > now).OrderBy(e => e.End).FirstOrDefault();
+        _inProgress.Text = live is null
+            ? (hasTask ? $"since {st.CurrentTaskSince?.LocalDateTime:HH:mm}" : $"Press {_engine.Settings.Hotkey} and choose one thing.")
+            : $"In progress: {live.Title} · ends {live.End.LocalDateTime:HH:mm}";
+
+        var next = st.CachedEvents.Where(e => !e.Cancelled && !e.IsAllDay && e.Start > now).OrderBy(e => e.Start).FirstOrDefault();
+        if (next is null)
+        {
+            _next.Text = "No more meetings today.";
+            _next.Foreground = Ui.B("Dim");
+        }
+        else
+        {
+            var mins = (next.Start - now).TotalMinutes;
+            _next.Text = $"Next: {next.Title} · {AlertScheduler.Describe(next, now)} ({next.Start.LocalDateTime:HH:mm})";
+            _next.Foreground = Ui.B(mins <= 5 ? "Alarm" : mins <= 15 ? "Warn" : "Accent");
+        }
     }
 
     void Render()
     {
         RenderNow();
-        var st = _engine.Store.State;
-        var now = DateTimeOffset.Now;
+        RenderChips();
+        RenderAgenda();
+        RenderTasks();
+        RenderPlan();
+        RenderProblems();
+    }
 
-        _agenda.Children.Clear();
-        var events = st.CachedEvents.Where(e => !e.Cancelled && e.End > now).OrderBy(e => e.IsAllDay ? 0 : 1).ThenBy(e => e.Start).ToList();
-        if (events.Count == 0) _agenda.Children.Add(Dim("Nothing scheduled. Connect a calendar, or you are free."));
-        DateTime? lastDay = null;
-        foreach (var e in events)
+    void RenderChips()
+    {
+        _chips.Children.Clear();
+        foreach (var p in _engine.Providers)
         {
-            if (lastDay != e.Start.LocalDateTime.Date)
+            var name = char.ToUpper(p[0]) + p[1..];
+            var ok = _engine.IsConnected(p);
+            var chip = Ui.Chip(ok ? name : $"Connect {name}", ok ? "ok" : "warn", ok ? "●" : "○");
+            if (!ok)
             {
-                lastDay = e.Start.LocalDateTime.Date;
-                _agenda.Children.Add(new TextBlock { Text = lastDay == DateTime.Today ? "Today" : lastDay == DateTime.Today.AddDays(1) ? "Tomorrow" : lastDay.Value.ToString("dddd"), Foreground = (Brush)Application.Current.Resources["Accent"], Margin = new Thickness(0, 8, 0, 2), FontWeight = FontWeights.SemiBold });
+                chip.Cursor = Cursors.Hand;
+                chip.MouseLeftButtonUp += async (_, _) => await ConnectAsync(p);
             }
-            _agenda.Children.Add(new TextBlock
-            {
-                Text = (e.IsAllDay ? "all day  " : $"{e.Start.LocalDateTime:HH:mm}  ") + e.Title,
-                Margin = new Thickness(0, 2, 0, 2),
-                Foreground = e.Start <= now ? (Brush)Application.Current.Resources["Alarm"] : (Brush)Application.Current.Resources["Fg"],
-            });
+            else chip.ToolTip = "Connected. Click Settings to change.";
+            _chips.Children.Add(chip);
+        }
+        if (!_engine.Providers.Any())
+        {
+            var c = Ui.Chip("No accounts connected", "warn", "○"); c.Cursor = Cursors.Hand;
+            c.MouseLeftButtonUp += (_, _) => new SettingsWindow(_engine).Show();
+            _chips.Children.Add(c);
+        }
+        _chips.Children.Add(_engine.Claude is null
+            ? Ui.Chip("AI off", "neutral", "✦")
+            : Ui.Chip(_engine.Budget.Summary.Replace("AI spend: ", ""), _engine.Budget.CutOff ? "alarm" : _engine.Budget.Warn ? "warn" : "accent", "✦"));
+    }
+
+    async Task ConnectAsync(string provider)
+    {
+        try { await _engine.ConnectAsync(provider, CancellationToken.None); await _engine.RefreshAllAsync(true); }
+        catch (Exception ex) { MessageBox.Show(ex.Message, "Anchor"); }
+        Render();
+    }
+
+    void RenderAgenda()
+    {
+        _agenda.Children.Clear();
+        var now = DateTimeOffset.Now;
+        var events = _engine.Store.State.CachedEvents.Where(e => !e.Cancelled && e.End > now)
+            .OrderBy(e => e.Start.LocalDateTime.Date).ThenBy(e => e.IsAllDay ? 0 : 1).ThenBy(e => e.Start).ToList();
+        if (events.Count == 0)
+        {
+            _agenda.Children.Add(Empty("Nothing scheduled", "Connect a calendar, or enjoy the space."));
+            return;
         }
 
+        DateTime? day = null;
+        foreach (var e in events)
+        {
+            if (day != e.Start.LocalDateTime.Date)
+            {
+                day = e.Start.LocalDateTime.Date;
+                _agenda.Children.Add(new TextBlock
+                {
+                    Text = day == DateTime.Today ? "Today" : day == DateTime.Today.AddDays(1) ? "Tomorrow" : day.Value.ToString("dddd d MMM"),
+                    FontWeight = FontWeights.SemiBold, Foreground = Ui.B("Accent"), Margin = new Thickness(0, _agenda.Children.Count == 0 ? 0 : 16, 0, 6),
+                });
+            }
+            var live = e.Start <= now && !e.IsAllDay;
+            var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var time = new TextBlock { Text = e.IsAllDay ? "all day" : e.Start.LocalDateTime.ToString("HH:mm"), Foreground = Ui.B("Dim"), VerticalAlignment = VerticalAlignment.Center };
+            var title = new TextBlock { Text = e.Title, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
+            row.Children.Add(time);
+            Grid.SetColumn(title, 1); row.Children.Add(title);
+            if (live) { var c = Ui.Chip("NOW", "accent"); c.Margin = new Thickness(8, 0, 0, 0); Grid.SetColumn(c, 2); row.Children.Add(c); }
+            else if (!e.IsAllDay && (e.Start - now).TotalMinutes <= 30)
+            {
+                var c = Ui.Chip($"in {Math.Ceiling((e.Start - now).TotalMinutes):0}m", (e.Start - now).TotalMinutes <= 5 ? "alarm" : "warn");
+                c.Margin = new Thickness(8, 0, 0, 0); Grid.SetColumn(c, 2); row.Children.Add(c);
+            }
+            row.ToolTip = $"{e.Start.LocalDateTime:HH:mm}–{e.End.LocalDateTime:HH:mm} · {e.Source}" + (e.Location is { Length: > 0 } l ? $" · {l}" : "");
+            _agenda.Children.Add(row);
+        }
+    }
+
+    void RenderTasks()
+    {
         _tasks.Children.Clear();
+        var st = _engine.Store.State;
         var open = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)
                            .OrderByDescending(t => t.Status == SuggestionStatus.Accepted).ThenByDescending(t => t.Confidence).ToList();
-        if (open.Count == 0) _tasks.Children.Add(Dim("Nothing flagged. New items appear here after each mail/chat refresh."));
+        if (open.Count == 0)
+        {
+            _tasks.Children.Add(Empty("You're clear", "Anything that needs a reply or action shows up here after each mail and chat refresh."));
+            return;
+        }
         foreach (var t in open) _tasks.Children.Add(TaskRow(t));
-
-        if (st.LastPlan is { Length: > 0 } && _plan.Text.Length == 0) _plan.Text = st.LastPlan;
-        RenderStatus();
     }
 
-    void RenderStatus()
+    void RenderPlan()
     {
-        var errs = _engine.SourceErrors.Count == 0 ? "" : "  ⚠ " + string.Join("; ", _engine.SourceErrors.Select(kv => $"{kv.Key}: {Short(kv.Value)}"));
-        var cal = _engine.Store.State.EventsRefreshed is { } r ? $"calendar synced {r.LocalDateTime:HH:mm}" : "calendar not synced";
-        _status.Text = $"{cal}  ·  {_engine.Budget.Summary}{(_engine.Claude is null ? "  ·  AI off (add API key in Settings)" : "")}{errs}";
+        var st = _engine.Store.State;
+        var text = _planOverride.Length > 0 ? _planOverride : st.LastPlan ?? "";
+        if (text.Length > 0) { _plan.Text = text; _plan.Foreground = Ui.B("Fg"); return; }
+        _plan.Foreground = Ui.B("Dim");
+        _plan.Text = _engine.Claude is null
+            ? "Add your Anthropic API key in Settings to get an AI plan built around your meetings."
+            : "Press “Plan my day” for a realistic plan around your meetings and open follow-ups.";
     }
 
-    static string Short(string s) => s.Length <= 90 ? s : s[..90] + "…";
+    void RenderProblems()
+    {
+        _problems.Children.Clear();
+        foreach (var kv in _engine.SourceErrors.Take(4))
+        {
+            var notConnected = kv.Value.EndsWith("is not connected.", StringComparison.OrdinalIgnoreCase);
+            var chip = Ui.Chip(notConnected ? $"{kv.Key}: not connected yet" : $"{kv.Key}: {Short(kv.Value)}", notConnected ? "neutral" : "warn", notConnected ? "○" : "⚠");
+            chip.ToolTip = kv.Value;
+            _problems.Children.Add(chip);
+        }
+        _problems.Visibility = _problems.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    static string Short(string s) => s.Length <= 80 ? s : s[..80] + "…";
 
     UIElement TaskRow(SuggestedTask t)
     {
-        var row = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-        row.Children.Add(new TextBlock { Text = t.Title, FontWeight = FontWeights.SemiBold });
-        row.Children.Add(Dim($"{t.Source} · {t.From}{(t.Due is { } d ? $" · due {d.LocalDateTime:ddd HH:mm}" : "")} · {(t.Confidence >= 0.6 ? "AI" : "keyword")} {t.Confidence:P0}"));
-        var btns = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
-        if (t.Link is { Length: > 0 } link)
+        var row = new StackPanel();
+        row.Children.Add(new TextBlock { Text = t.Title, FontWeight = FontWeights.SemiBold, FontSize = 14 });
+        var meta = $"{t.Source} · {Clean(t.From)}{(t.Due is { } d ? $" · due {d.LocalDateTime:ddd HH:mm}" : "")}";
+        row.Children.Add(new TextBlock { Text = meta, FontSize = 12, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
+
+        var btns = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(-9, 8, 0, -4) };
+        void Add(string text, Action act, bool accent = false)
         {
-            var open = new Button { Content = "Open", Padding = new Thickness(8, 3, 8, 3) };
-            open.Click += (_, _) => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true });
-            btns.Children.Add(open);
+            var b = Ui.Ghost(text);
+            if (accent) b.Foreground = Ui.B("Accent");
+            b.Click += (_, _) => act();
+            btns.Children.Add(b);
         }
-        if (t.Status == SuggestionStatus.Pending)
-        {
-            var keep = new Button { Content = "Keep", Padding = new Thickness(8, 3, 8, 3) };
-            keep.Click += (_, _) => { _engine.SetStatus(t.Id, SuggestionStatus.Accepted); Render(); };
-            btns.Children.Add(keep);
-        }
-        var done = new Button { Content = "Done", Padding = new Thickness(8, 3, 8, 3) };
-        done.Click += (_, _) => { _engine.SetStatus(t.Id, SuggestionStatus.Done); Render(); };
-        var no = new Button { Content = "Not a task", Padding = new Thickness(8, 3, 8, 3) };
-        no.Click += (_, _) => { _engine.SetStatus(t.Id, SuggestionStatus.Dismissed); Render(); };
-        var doing = new Button { Content = "Doing now", Padding = new Thickness(8, 3, 8, 3) };
-        doing.Click += (_, _) => { _engine.SetCurrentTask(t.Title); Render(); };
-        btns.Children.Add(doing); btns.Children.Add(done); btns.Children.Add(no);
+        if (t.Link is { Length: > 0 } link) Add("Open", () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }), accent: true);
+        Add("Doing now", () => { _engine.SetCurrentTask(t.Title); Render(); });
+        if (t.Status == SuggestionStatus.Pending) Add("Keep", () => { _engine.SetStatus(t.Id, SuggestionStatus.Accepted); Render(); });
+        Add("Done", () => { _engine.SetStatus(t.Id, SuggestionStatus.Done); Render(); });
+        Add("Not a task", () => { _engine.SetStatus(t.Id, SuggestionStatus.Dismissed); Render(); });
         row.Children.Add(btns);
-        return row;
+
+        var card = new Border
+        {
+            Background = Ui.B("CardRaised"), CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 12, 14, 10),
+            Margin = new Thickness(0, 0, 0, 8), Child = row,
+        };
+        if (t.Confidence < 0.6) card.ToolTip = "Flagged by keywords, not AI. Confidence is low.";
+        return card;
     }
 
-    static Border Card(UIElement child) => new() { Background = (Brush)Application.Current.Resources["Card"], Padding = new Thickness(16), Child = child };
-    static TextBlock Label(string s) => new() { Text = s, FontSize = 11, FontWeight = FontWeights.Bold, Foreground = (Brush)Application.Current.Resources["Dim"], Margin = new Thickness(0, 0, 0, 6) };
-    static TextBlock Dim(string s) => new() { Text = s, FontSize = 12, Foreground = (Brush)Application.Current.Resources["Dim"] };
-    static UIElement Docked(UIElement e, Dock d) { DockPanel.SetDock(e, d); return e; }
-    static Button Tool(string text, Action click) { var b = new Button { Content = text, Margin = new Thickness(0, 0, 8, 6) }; b.Click += (_, _) => click(); return b; }
+    static string Clean(string from)
+    {
+        var i = from.IndexOf('<');
+        return (i > 0 ? from[..i] : from).Trim().Trim('"');
+    }
+
+    static UIElement Empty(string title, string body) => new StackPanel
+    {
+        Margin = new Thickness(0, 24, 0, 0),
+        Children =
+        {
+            new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center },
+            new TextBlock { Text = body, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, MaxWidth = 300 },
+        },
+    };
 }

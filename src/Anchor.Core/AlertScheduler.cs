@@ -45,6 +45,7 @@ public static class AlertScheduler
     public static string Describe(CalendarEvent e, DateTimeOffset now)
     {
         var delta = e.Start - now;
+        if (delta.TotalMinutes >= 120) return $"starts in {(int)delta.TotalHours}h {delta.Minutes}m";
         if (delta.TotalSeconds > 60) return $"starts in {Math.Ceiling(delta.TotalMinutes):0} min";
         if (delta.TotalSeconds > -30) return "is starting NOW";
         return $"started {Math.Max(1, Math.Floor(-delta.TotalMinutes)):0} min ago";
