@@ -433,3 +433,48 @@ public class BridgeEventTests
         Assert.Equal("Busy (work meeting)", Assert.Single(AiPrivacy.Events(
             [new CalendarEvent("x", Bridge.EventSource, "Secret", Now, Now.AddHours(1))], allowWork: false, new HashSet<string>())).Title);
 }
+
+public class UsageAndCostTests
+{
+    [Fact]
+    public void Cli_envelope_reports_cost()
+    {
+        var e = ClaudeCliBackend.ParseEnvelope("{\"is_error\":false,\"result\":\"ok\",\"total_cost_usd\":0.0123}", "", 0);
+        Assert.Equal("ok", e.Text);
+        Assert.Equal(0.0123, e.CostUsd, 4);
+    }
+
+    [Fact]
+    public void Usage_json_accepts_numbers_or_strings_and_rejects_nonsense()
+    {
+        var a = Bridge.ParseUsage("{\"plan\":\"Enterprise\",\"spent\":161.9,\"limit\":250,\"percentUsed\":64,\"currency\":\"USD\",\"checkedAt\":\"2026-10-17T18:55:00-04:00\"}")!;
+        Assert.Equal(161.9, a.Spent); Assert.Equal(250, a.Limit); Assert.Equal(64, a.PercentUsed);
+        var b = Bridge.ParseUsage("{\"spent\":\"161.90\",\"limit\":\"250.00\"}")!;
+        Assert.Equal(161.90, b.Spent); Assert.InRange(b.PercentUsed, 64.7, 64.8);  // derived when absent
+        Assert.Null(Bridge.ParseUsage("{\"spent\":1}"));
+        Assert.Null(Bridge.ParseUsage("garbage"));
+    }
+
+    [Fact]
+    public void Cli_and_api_ledgers_are_kept_apart_and_caps_apply()
+    {
+        var store = new StateStore(Path.Combine(Path.GetTempPath(), $"anchor-test-{Guid.NewGuid():N}.json"));
+        var api = new BudgetTracker(store, new AiSettings());
+        var cli = new BudgetTracker(store, new AiSettings { DailySoftCapUsd = 0.5, CutoffUsd = 5 }, "cli:");
+        api.Record("claude-sonnet-5-5", 500_000, 0);               // $1.00 on the API ledger
+        Assert.Equal(0, cli.SpentToday);
+        cli.RecordCost(0.6);
+        Assert.False(cli.Allow(background: true));                  // past the daily soft cap
+        Assert.True(cli.Allow(background: false));                  // user-initiated still fine
+        Assert.Equal(1.0, api.SpentToday, 2);                       // unaffected
+    }
+
+    [Fact]
+    public void Event_link_is_kept_only_for_web_urls()
+    {
+        var now = new DateTimeOffset(2026, 10, 19, 9, 0, 0, TimeSpan.FromHours(-4));
+        var ev = Bridge.ParseEvents("[{\"id\":\"a\",\"title\":\"X\",\"start\":\"2026-10-19T13:00:00-04:00\",\"link\":\"https://outlook.office365.com/owa/?itemid=1\"},{\"id\":\"b\",\"title\":\"Y\",\"start\":\"2026-10-19T14:00:00-04:00\",\"link\":\"file:///c:/x\"}]", now);
+        Assert.StartsWith("https://outlook.office365.com", ev[0].OpenUrl);
+        Assert.Null(ev[1].OpenUrl);
+    }
+}

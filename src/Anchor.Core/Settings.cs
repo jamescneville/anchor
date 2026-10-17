@@ -69,6 +69,10 @@ public sealed class ClaudeDesktopSettings
     public string CliPath { get; set; } = "";
     public string FastModel { get; set; } = "haiku";
     public string PlanModel { get; set; } = "sonnet";
+    /// <summary>Anchor's own cap on what its background Claude calls may cost (USD, as the CLI reports them). Background work stops past the daily soft cap.</summary>
+    public double DailySoftCapUsd { get; set; } = 1.00;
+    /// <summary>Anchor stops using Claude entirely past this monthly amount.</summary>
+    public double MonthlyCapUsd { get; set; } = 15;
 }
 
 public sealed class AiSettings

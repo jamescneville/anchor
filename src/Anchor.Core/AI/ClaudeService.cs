@@ -6,17 +6,17 @@ using Anthropic.Models.Messages;
 namespace Anchor.Core.AI;
 
 /// <summary>Local spend ledger. A local estimate: it cannot replace the billing console limit.</summary>
-public sealed class BudgetTracker(StateStore store, AiSettings s)
+public sealed class BudgetTracker(StateStore store, AiSettings s, string prefix = "")
 {
-    static string Day(DateTimeOffset d) => d.ToString("yyyy-MM-dd");
+    string Day(DateTimeOffset d) => prefix + d.ToString("yyyy-MM-dd");
 
     public double SpentToday => store.State.SpendByDay.GetValueOrDefault(Day(DateTimeOffset.Now));
     public double SpentMonth
     {
         get
         {
-            var prefix = DateTimeOffset.Now.ToString("yyyy-MM");
-            return store.State.SpendByDay.Where(kv => kv.Key.StartsWith(prefix)).Sum(kv => kv.Value);
+            var month = prefix + DateTimeOffset.Now.ToString("yyyy-MM");
+            return store.State.SpendByDay.Where(kv => kv.Key.StartsWith(month)).Sum(kv => kv.Value);
         }
     }
 
@@ -25,6 +25,10 @@ public sealed class BudgetTracker(StateStore store, AiSettings s)
 
     /// <summary>Background work honours the daily soft cap; user-initiated work only the monthly cutoff.</summary>
     public bool Allow(bool background) => s.Enabled && !CutOff && (!background || SpentToday < s.DailySoftCapUsd);
+
+    /// <summary>For backends that report the cost themselves (the Claude CLI).</summary>
+    public void RecordCost(double usd) =>
+        store.Mutate(st => st.SpendByDay[Day(DateTimeOffset.Now)] = st.SpendByDay.GetValueOrDefault(Day(DateTimeOffset.Now)) + usd);
 
     public double Record(string model, long inputTokens, long outputTokens)
     {

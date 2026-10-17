@@ -210,8 +210,16 @@ public sealed class MainWindow : Window
             _chips.Children.Add(Ui.Chip($"${_engine.Budget.SpentToday:0.00} today", _engine.Budget.CutOff ? "alarm" : _engine.Budget.Warn ? "warn" : "accent", "✦"));
         else
         {
-            var c = Ui.Chip("Claude", "accent", "✦");
-            c.ToolTip = "AI runs silently through your signed-in Claude account.";
+            var cli = _engine.CliBudget;
+            var u = _engine.Store.State.AccountUsage;
+            var fresh = u is not null && DateTimeOffset.Now - u.CheckedAt < TimeSpan.FromHours(26);
+            var tip = new System.Text.StringBuilder();
+            if (fresh) tip.AppendLine($"Your Claude account this month: ${u!.Spent:0.00} of ${u.Limit:0.00} ({u.PercentUsed:0}%), checked {Fmt.Time(u.CheckedAt)}");
+            else tip.AppendLine("Account-wide usage appears after the Outlook sync task runs.");
+            tip.Append($"Anchor's own Claude calls: ${cli.SpentToday:0.00} today · ${cli.SpentMonth:0.00} this month (cap ${_engine.Settings.ClaudeDesktop.MonthlyCapUsd:0})");
+            var kind = cli.CutOff ? "alarm" : fresh && u!.PercentUsed >= 90 ? "alarm" : fresh && u!.PercentUsed >= 75 ? "warn" : "accent";
+            var c = Ui.Chip(fresh ? $"{u!.PercentUsed:0}% · ${u.Spent:0}/{u.Limit:0}" : $"${cli.SpentToday:0.00} today", kind, "✦");
+            c.ToolTip = tip.ToString();
             _chips.Children.Add(c);
         }
     }

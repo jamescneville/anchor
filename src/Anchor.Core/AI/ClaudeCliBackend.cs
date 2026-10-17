@@ -8,13 +8,14 @@ namespace Anchor.Core.AI;
 /// Runs the local Claude Code CLI headless (claude -p) with the user's own Claude login: no API key, no window.
 /// Each call is a single tool-less turn with no settings, MCP servers or session saved, so it is cheap and cannot act on anything.
 /// </summary>
-public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s) : AiBackend
+public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, BudgetTracker? budget = null) : AiBackend
 {
     // One Claude process at a time: they share an OAuth token file, and parallel refreshes collide.
     static readonly SemaphoreSlim OneAtATime = new(1, 1);
 
     public string ExePath => exePath;
     public override string Label => "Claude login";
+    public override bool Allow(bool background) => budget?.Allow(background) ?? true;
 
     // ---------------------------------------------------------------- locating the CLI
 
@@ -103,7 +104,9 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s) : 
             var stdout = proc.StandardOutput.ReadToEndAsync(timeout.Token);
             var stderr = proc.StandardError.ReadToEndAsync(timeout.Token);
             await proc.WaitForExitAsync(timeout.Token);
-            return ParseResult(await stdout, await stderr, proc.ExitCode);
+            var env = ParseEnvelope(await stdout, await stderr, proc.ExitCode);
+            if (env.CostUsd > 0) budget?.RecordCost(env.CostUsd);
+            return env.Text;
         }
         catch (OperationCanceledException)
         {
@@ -112,8 +115,13 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s) : 
         }
     }
 
-    /// <summary>Public for tests: turns the CLI's JSON envelope into text or a meaningful error.</summary>
-    public static string ParseResult(string stdout, string stderr, int exitCode)
+    public sealed record Envelope(string Text, double CostUsd);
+
+    /// <summary>Public for tests: the result text only.</summary>
+    public static string ParseResult(string stdout, string stderr, int exitCode) => ParseEnvelope(stdout, stderr, exitCode).Text;
+
+    /// <summary>Public for tests: turns the CLI's JSON envelope into text + reported cost, or a meaningful error.</summary>
+    public static Envelope ParseEnvelope(string stdout, string stderr, int exitCode)
     {
         var json = stdout.Trim();
         var start = json.IndexOf('{');
@@ -125,7 +133,8 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s) : 
                 var r = doc.RootElement;
                 var result = r.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.String ? res.GetString() ?? "" : "";
                 var isError = r.TryGetProperty("is_error", out var ie) && ie.ValueKind == JsonValueKind.True;
-                if (!isError && exitCode == 0) return result;
+                var cost = r.TryGetProperty("total_cost_usd", out var tc) && tc.ValueKind == JsonValueKind.Number && tc.TryGetDouble(out var cv) ? cv : 0;
+                if (!isError && exitCode == 0) return new Envelope(result, cost);
                 if (result.Contains("refresh", StringComparison.OrdinalIgnoreCase) && result.Contains("OAuth", StringComparison.OrdinalIgnoreCase))
                     throw new TransientCliException(result);
                 if (result.Contains("not logged in", StringComparison.OrdinalIgnoreCase) || result.Contains("/login", StringComparison.OrdinalIgnoreCase))

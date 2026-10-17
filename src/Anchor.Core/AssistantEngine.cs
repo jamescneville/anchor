@@ -29,6 +29,8 @@ public sealed class AssistantEngine : IDisposable
     public StateStore Store { get; }
     public TokenStore Tokens { get; } = new();
     public BudgetTracker Budget { get; }
+    /// <summary>Ledger for the Claude-login (CLI) path, kept apart from API spend.</summary>
+    public BudgetTracker CliBudget { get; }
     public AiBackend? Claude { get; private set; }
     int _aiBusy;
     public bool AiBusy => _aiBusy > 0;
@@ -46,6 +48,12 @@ public sealed class AssistantEngine : IDisposable
         _settings = settings;
         Store = store;
         Budget = new BudgetTracker(store, settings.Ai);
+        var cd = settings.ClaudeDesktop;
+        CliBudget = new BudgetTracker(store, new AiSettings
+        {
+            Enabled = true, DailySoftCapUsd = cd.DailySoftCapUsd, MonthlyBudgetUsd = cd.MonthlyCapUsd,
+            WarnUsd = cd.MonthlyCapUsd * 0.75, CutoffUsd = cd.MonthlyCapUsd,
+        }, "cli:");
         BuildAi();
         BuildSources();
     }
@@ -89,7 +97,7 @@ public sealed class AssistantEngine : IDisposable
             return;
         }
         var cd = _settings.ClaudeDesktop;
-        if (cd.Enabled && ClaudeCliBackend.Locate(cd.CliPath) is { } exe) Claude = new ClaudeCliBackend(exe, cd);
+        if (cd.Enabled && ClaudeCliBackend.Locate(cd.CliPath) is { } exe) Claude = new ClaudeCliBackend(exe, cd, CliBudget);
         else CliMissing = cd.Enabled;
     }
 
@@ -179,10 +187,12 @@ public sealed class AssistantEngine : IDisposable
             var plan = Bridge.ReadPlan(Bridge.Dir, out var at);
             var tasks = Bridge.ReadTasks(Bridge.Dir, DateTimeOffset.Now);
             var events = Bridge.ReadEvents(Bridge.Dir, DateTimeOffset.Now);
+            var usage = Bridge.ReadUsage(Bridge.Dir);
             var eventsAt = File.Exists(Path.Combine(Bridge.Dir, Bridge.EventsFile)) ? new DateTimeOffset(File.GetLastWriteTime(Path.Combine(Bridge.Dir, Bridge.EventsFile))) : (DateTimeOffset?)null;
             var changed = false;
             Store.Mutate(s =>
             {
+                if (usage is not null && usage != s.AccountUsage) { s.AccountUsage = usage; changed = true; }
                 if (plan is not null && (plan != s.BridgePlan || at != s.BridgePlanAt)) { s.BridgePlan = plan; s.BridgePlanAt = at; changed = true; }
                 foreach (var t in tasks.Where(t => s.Tasks.All(x => x.Id != t.Id))) { s.Tasks.Add(t); changed = true; }
                 if (eventsAt is not null && eventsAt != s.BridgeEventsAt)

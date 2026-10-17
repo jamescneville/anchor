@@ -12,6 +12,7 @@ public static class Bridge
     public const string PlanFile = "plan.md";
     public const string TasksFile = "tasks.json";
     public const string EventsFile = "events.json";
+    public const string UsageFile = "usage.json";
     /// <summary>Source label for calendar events dropped by Claude. Contains the product name so work redaction applies.</summary>
     public const string EventSource = "Claude/Outlook";
     const int MaxBytes = 200_000;
@@ -50,6 +51,33 @@ public static class Bridge
         return ParseEvents(ReadShared(f), now);
     }
 
+    public static ClaudeUsage? ReadUsage(string dir)
+    {
+        var f = Path.Combine(dir, UsageFile);
+        return File.Exists(f) && new FileInfo(f).Length <= MaxBytes ? ParseUsage(ReadShared(f)) : null;
+    }
+
+    /// <summary>usage.json: {"plan","spent","limit","percentUsed","currency","checkedAt"}. Numbers may arrive as strings.</summary>
+    public static ClaudeUsage? ParseUsage(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            if (r.ValueKind != JsonValueKind.Object) return null;
+            double Num(string n) => r.TryGetProperty(n, out var p)
+                ? p.ValueKind == JsonValueKind.Number && p.TryGetDouble(out var d) ? d
+                : p.ValueKind == JsonValueKind.String && double.TryParse(p.GetString(), System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : double.NaN
+                : double.NaN;
+            var spent = Num("spent"); var limit = Num("limit");
+            if (double.IsNaN(spent) || double.IsNaN(limit) || limit <= 0) return null;
+            var pct = Num("percentUsed"); if (double.IsNaN(pct)) pct = spent / limit * 100;
+            var at = r.TryGetProperty("checkedAt", out var c) && c.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(c.GetString(), out var t) ? t : DateTimeOffset.Now;
+            return new ClaudeUsage(Str(r, "plan", 40), spent, limit, Math.Clamp(pct, 0, 1000), Str(r, "currency", 8) is { Length: > 0 } cur ? cur : "USD", at);
+        }
+        catch (JsonException) { return null; }
+    }
+
     static readonly string[] VirtualWords = ["teams meeting", "microsoft teams", "zoom", "google meet", "webex", "online", "virtual"];
 
     /// <summary>
@@ -83,7 +111,8 @@ public static class Bridge
                 list.Add(new CalendarEvent("bridge:" + id, EventSource, title, start, end, SafeLink(Str(e, "joinUrl", 500)),
                     loc.Length > 0 ? loc : null,
                     e.TryGetProperty("allDay", out var ad) && ad.ValueKind == JsonValueKind.True,
-                    e.TryGetProperty("cancelled", out var c) && c.ValueKind == JsonValueKind.True));
+                    e.TryGetProperty("cancelled", out var c) && c.ValueKind == JsonValueKind.True,
+                    SafeLink(Str(e, "link", 800))));
             }
             return list;
         }

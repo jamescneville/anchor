@@ -9,7 +9,11 @@ public sealed record CalendarEvent(
     string? JoinUrl = null,
     string? Location = null,
     bool IsAllDay = false,
-    bool Cancelled = false);
+    bool Cancelled = false,
+    string? OpenUrl = null);   // link to open the event itself (e.g. in Outlook on the web)
+
+/// <summary>Account-level Claude spend as last reported by the sync task (the app's own usage card figures).</summary>
+public sealed record ClaudeUsage(string Plan, double Spent, double Limit, double PercentUsed, string Currency, DateTimeOffset CheckedAt);
 
 public sealed record InboxItem(
     string Id,

@@ -72,6 +72,13 @@ public sealed class AlertWindow : Window
             join.Click += (_, _) => { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); Resolve(ack: true); };
             buttons.Children.Add(join);
         }
+        if (e.JoinUrl is not { Length: > 0 } && Anchor.Core.Bridge.SafeLink(e.OpenUrl) is { } open)
+        {
+            var openBtn = Ui.Primary("Open event", big ? 24 : 14, big ? 12 : 7);
+            openBtn.FontSize = big ? 16 : 13;
+            openBtn.Click += (_, _) => { Process.Start(new ProcessStartInfo(open) { UseShellExecute = true }); Resolve(ack: true); };
+            buttons.Children.Add(openBtn);
+        }
         var snooze = Ui.Secondary($"Snooze {_engine.Settings.SnoozeMinutes} min");
         snooze.Padding = new Thickness(big ? 20 : 12, big ? 12 : 7, big ? 20 : 12, big ? 12 : 7);
         snooze.FontSize = big ? 16 : 13;
