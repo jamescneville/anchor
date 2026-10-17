@@ -47,6 +47,13 @@ Skylight has no public API; it mirrors a Google/Outlook/iCloud calendar. Anchor 
 - No screenshots, keystroke capture or window tracking. Focus support is a manual current task, a check-in
   prompt every `CheckInMinutes` during work hours, and the recovery hotkey.
 
+## Redaction before AI
+
+With `Ai.SendWorkContentToClaude` off (default), **nothing from work sources is put in an AI prompt**: mail/chat triage skips
+Outlook/Teams/Slack, and day plans / recovery replace work meetings with "Busy (work meeting)" (times kept, title/location/link
+dropped) and collapse work follow-ups into a count. Work sources are Outlook, Teams, Slack and ICS feeds not marked `| personal`.
+Work items still appear locally in the agenda and attention list, and meeting alerts are unaffected.
+
 ## Cost control
 
 Triage uses Haiku 5.5 (thinking off, batches of 15). Day plans use Sonnet 5.5. Prices are in

@@ -48,6 +48,10 @@ public sealed class AssistantEngine : IDisposable
     public const string AnthropicKeyName = "anthropic";
     public AnchorSettings Settings => _settings;
 
+    IReadOnlySet<string> WorkIcsSources => _settings.IcsFeeds.Where(f => f.IsWork).Select(f => "ICS/" + f.Name).ToHashSet();
+    IReadOnlyList<CalendarEvent> ForAi(IEnumerable<CalendarEvent> e) => AiPrivacy.Events(e, _settings.Ai.SendWorkContentToClaude, WorkIcsSources);
+    IReadOnlyList<SuggestedTask> ForAi(IEnumerable<SuggestedTask> t) => AiPrivacy.Tasks(t, _settings.Ai.SendWorkContentToClaude, WorkIcsSources);
+
     public void SaveAnthropicKey(string key)
     {
         if (string.IsNullOrWhiteSpace(key)) Tokens.Remove(AnthropicKeyName);
@@ -376,8 +380,8 @@ public sealed class AssistantEngine : IDisposable
         if (!Budget.Allow(background: false)) return "AI budget limit reached for this month. " + Budget.Summary;
         var now = DateTimeOffset.Now;
         var plan = await Claude.PlanDayAsync(
-            Store.State.CachedEvents.Where(e => e.End > now && e.Start < now.AddHours(36)),
-            Store.State.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).Take(12),
+            ForAi(Store.State.CachedEvents.Where(e => e.End > now && e.Start < now.AddHours(36))),
+            ForAi(Store.State.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).Take(12)),
             Store.State.CurrentTask, eveningSweep, _cts.Token);
         if (!eveningSweep) Store.Mutate(s => { s.LastPlan = plan; s.LastPlanAt = DateTimeOffset.Now; });
         return plan;
@@ -410,8 +414,9 @@ public sealed class AssistantEngine : IDisposable
     {
         if (Claude is null || !Budget.Allow(background: false)) return null;
         var st = Store.State;
-        return await Claude.RecoverAsync(st.CurrentTask, st.Checkpoint, AlertScheduler.NextEvent(st.CachedEvents, DateTimeOffset.Now),
-            st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted), _cts.Token);
+        var next = AlertScheduler.NextEvent(ForAi(st.CachedEvents), DateTimeOffset.Now);
+        return await Claude.RecoverAsync(st.CurrentTask, st.Checkpoint, next,
+            ForAi(st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)), _cts.Token);
     }
 
     public void Dispose()

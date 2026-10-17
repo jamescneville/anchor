@@ -223,3 +223,51 @@ public class FmtTests
         finally { Fmt.Use24Hour = false; }
     }
 }
+
+public class AiPrivacyTests
+{
+    static readonly IReadOnlySet<string> NoIcs = new HashSet<string>();
+    static CalendarEvent Ev(string source, string title) =>
+        new("e", source, title, DateTimeOffset.Now.AddHours(1), DateTimeOffset.Now.AddHours(2), "https://teams.microsoft.com/x", "Room 4");
+
+    [Fact]
+    public void Work_meetings_keep_times_but_lose_titles()
+    {
+        var r = Assert.Single(AiPrivacy.Events([Ev("Outlook", "Acme layoffs prep")], allowWork: false, NoIcs));
+        Assert.Equal("Busy (work meeting)", r.Title);
+        Assert.Null(r.JoinUrl);
+        Assert.Null(r.Location);
+    }
+
+    [Fact]
+    public void Personal_google_events_pass_through() =>
+        Assert.Equal("Dentist", Assert.Single(AiPrivacy.Events([Ev("Google/Home", "Dentist")], allowWork: false, NoIcs)).Title);
+
+    [Fact]
+    public void Work_ics_feeds_are_redacted_but_personal_ones_are_not()
+    {
+        var work = new HashSet<string> { "ICS/Work" };
+        var r = AiPrivacy.Events([Ev("ICS/Work", "Secret"), Ev("ICS/Family", "Soccer")], false, work);
+        Assert.Equal(["Busy (work meeting)", "Soccer"], r.Select(e => e.Title));
+    }
+
+    [Fact]
+    public void Allowing_work_content_disables_redaction() =>
+        Assert.Equal("Acme layoffs prep", Assert.Single(AiPrivacy.Events([Ev("Outlook", "Acme layoffs prep")], allowWork: true, NoIcs)).Title);
+
+    [Fact]
+    public void Work_followups_collapse_into_a_count()
+    {
+        var tasks = new[]
+        {
+            new SuggestedTask { Id = "1", Title = "Send Q3 deck to VP", Source = "Outlook" },
+            new SuggestedTask { Id = "2", Title = "Reply about budget", Source = "Teams" },
+            new SuggestedTask { Id = "3", Title = "Call plumber", Source = "Gmail" },
+        };
+        var r = AiPrivacy.Tasks(tasks, false, NoIcs);
+        Assert.Equal(2, r.Count);
+        Assert.Contains(r, t => t.Title == "Call plumber");
+        Assert.Contains(r, t => t.Title == "2 work follow-ups (details withheld)");
+        Assert.DoesNotContain(r, t => t.Title.Contains("VP"));
+    }
+}

@@ -66,13 +66,14 @@ public sealed class SettingsWindow : Window
         Toggle("Enable Slack", null, _s.Slack.Enabled, v => _s.Slack.Enabled = v);
         Secret("User token", "xoxp-… with the search:read scope", _s.Slack.UserToken, v => _s.Slack.UserToken = v.Trim());
 
-        Section("Calendar feeds (ICS)", "Read-only calendars published as a link. One per line: Name | https://…");
+        Section("Calendar feeds (ICS)", "Read-only calendars published as a link. One per line: Name | https://… | personal (add “| personal” for non-work feeds; work feeds are redacted from AI prompts).");
         var ics = new TextBox { AcceptsReturn = true, MinHeight = 70, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12,
-            Text = string.Join(Environment.NewLine, _s.IcsFeeds.Select(f => $"{f.Name} | {f.Url}")) };
+            Text = string.Join(Environment.NewLine, _s.IcsFeeds.Select(f => $"{f.Name} | {f.Url}" + (f.IsWork ? "" : " | personal"))) };
         _section.Children.Add(ics);
         _apply.Add(() => _s.IcsFeeds = ics.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(l => l.Split('|', 2, StringSplitOptions.TrimEntries))
-            .Where(p => p.Length == 2 && p[1].Length > 0).Select(p => new IcsFeed { Name = p[0], Url = p[1] }).ToList());
+            .Select(l => l.Split('|', 3, StringSplitOptions.TrimEntries))
+            .Where(p => p.Length >= 2 && p[1].Length > 0)
+            .Select(p => new IcsFeed { Name = p[0], Url = p[1], IsWork = !(p.Length == 3 && p[2].Equals("personal", StringComparison.OrdinalIgnoreCase)) }).ToList());
         EndSection();
 
         // Footer

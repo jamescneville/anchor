@@ -52,6 +52,8 @@ public sealed class IcsFeed
 {
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
+    /// <summary>Work calendars are redacted in AI prompts unless Ai.SendWorkContentToClaude is on. Set false for a personal feed.</summary>
+    public bool IsWork { get; set; } = true;
 }
 
 public sealed class AiSettings
