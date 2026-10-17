@@ -16,6 +16,10 @@ public partial class App : Application
     [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint vk);
     [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    /// <summary>True once we really want to exit; until then closing the main window only hides it to the tray.</summary>
+    public static bool Exiting { get; private set; }
+    public static void Quit() { Exiting = true; Current.Shutdown(); }
+
     Mutex? _single;
     AssistantEngine? _engine;
     MainWindow? _main;
@@ -105,7 +109,7 @@ public partial class App : Application
         var startup = new System.Windows.Forms.ToolStripMenuItem("Start with Windows") { Checked = IsAutoStart(), CheckOnClick = true };
         startup.CheckedChanged += (_, _) => SetAutoStart(startup.Checked);
         menu.Items.Add(startup);
-        menu.Items.Add("Exit", null, (_, _) => { _tray!.Visible = false; _engine?.Dispose(); Shutdown(); });
+        menu.Items.Add("Exit", null, (_, _) => { _tray!.Visible = false; _engine?.Dispose(); Quit(); });
 
         _tray = new System.Windows.Forms.NotifyIcon
         {

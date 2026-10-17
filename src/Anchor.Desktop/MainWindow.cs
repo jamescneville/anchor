@@ -88,7 +88,7 @@ public sealed class MainWindow : Window
         _engine.Changed += () => Dispatcher.BeginInvoke(Render);
         _clock.Tick += (_, _) => RenderNow();
         _clock.Start();
-        Closing += (_, e) => { e.Cancel = true; Hide(); }; // lives in the tray
+        Closing += (_, e) => { if (App.Exiting) { _clock.Stop(); return; } e.Cancel = true; Hide(); }; // lives in the tray
         Render();
     }
 

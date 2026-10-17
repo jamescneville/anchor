@@ -99,7 +99,7 @@ public sealed class SettingsWindow : Window
         catch (Exception ex) { MessageBox.Show(ex.Message, "Anchor settings"); return; }
 
         Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--restart") { UseShellExecute = true });
-        Application.Current.Shutdown();
+        App.Quit();
     }
 
     // ---- row helpers
