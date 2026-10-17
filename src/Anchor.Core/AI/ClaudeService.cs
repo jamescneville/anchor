@@ -113,7 +113,7 @@ public sealed class ClaudeService(AnthropicClient client, AiSettings s, BudgetTr
         catch (JsonException) { return []; }
     }
 
-    public async Task<string> PlanDayAsync(IEnumerable<CalendarEvent> events, IEnumerable<SuggestedTask> tasks, string currentTask, CancellationToken ct)
+    public async Task<string> PlanDayAsync(IEnumerable<CalendarEvent> events, IEnumerable<SuggestedTask> tasks, string currentTask, bool eveningSweep, CancellationToken ct)
     {
         var now = DateTimeOffset.Now;
         var sb = new StringBuilder();
@@ -125,7 +125,11 @@ public sealed class ClaudeService(AnthropicClient client, AiSettings s, BudgetTr
         foreach (var t in tasks) sb.AppendLine($"- {Trim(t.Title, 100)} ({t.Source}{(t.Due is { } d ? $", due {d.LocalDateTime:ddd HH:mm}" : "")})");
         if (currentTask.Length > 0) sb.AppendLine($"Currently working on: {currentTask}");
 
-        var system = "You are a calm executive assistant for someone with severe ADHD. Produce a realistic plan for the rest of today " +
+        var system = eveningSweep
+            ? "You are a calm executive assistant for someone with severe ADHD. It is end of day. Produce a short wrap-up: " +
+              "1) 'Still open' - unfinished follow-ups worth carrying over (drop trivia). 2) 'Tomorrow starts with' - the first meeting and the single first action. " +
+              "3) 'Let go of' - anything safe to ignore. Under 120 words, plain text, no preamble. Do not invent meetings or tasks. " + UntrustedNote
+            : "You are a calm executive assistant for someone with severe ADHD. Produce a realistic plan for the rest of today " +
                      "(and a one-line heads-up for tomorrow if something early is coming). Format: " +
                      "1) 'Next up' - the single next thing and when. 2) Top 3 priorities. 3) A short time-blocked schedule that respects " +
                      "meetings, with buffers and breaks. 4) 'Might slip' - things at risk. Keep it under 180 words, plain text, no preamble. " +

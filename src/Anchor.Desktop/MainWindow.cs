@@ -76,7 +76,7 @@ public sealed class MainWindow : Window
                 Render();
             }));
         }
-        bar.Children.Add(Tool("Open settings file", () => Process.Start(new ProcessStartInfo(AppPaths.SettingsFile) { UseShellExecute = true })));
+        bar.Children.Add(Tool("Settings", () => new SettingsWindow(_engine).Show()));
         bar.Children.Add(_status);
         _status.VerticalAlignment = VerticalAlignment.Center;
         var barHost = new StackPanel { Children = { bar } };
@@ -142,7 +142,7 @@ public sealed class MainWindow : Window
     {
         var errs = _engine.SourceErrors.Count == 0 ? "" : "  ⚠ " + string.Join("; ", _engine.SourceErrors.Select(kv => $"{kv.Key}: {Short(kv.Value)}"));
         var cal = _engine.Store.State.EventsRefreshed is { } r ? $"calendar synced {r.LocalDateTime:HH:mm}" : "calendar not synced";
-        _status.Text = $"{cal}  ·  {_engine.Budget.Summary}{(_engine.Claude is null ? "  ·  AI off (no ANTHROPIC_API_KEY)" : "")}{errs}";
+        _status.Text = $"{cal}  ·  {_engine.Budget.Summary}{(_engine.Claude is null ? "  ·  AI off (add API key in Settings)" : "")}{errs}";
     }
 
     static string Short(string s) => s.Length <= 90 ? s : s[..90] + "…";

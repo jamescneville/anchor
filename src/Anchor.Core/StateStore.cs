@@ -20,6 +20,9 @@ public sealed class AnchorState
     // AI budget ledger (USD), keyed by yyyy-MM-dd
     public Dictionary<string, double> SpendByDay { get; set; } = new();
 
+    public string LastMorningBrief { get; set; } = "";
+    public string LastEveningBrief { get; set; } = "";
+
     public string? LastPlan { get; set; }
     public DateTimeOffset? LastPlanAt { get; set; }
 }

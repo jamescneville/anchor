@@ -33,6 +33,8 @@ public sealed class AssistantEngine : IDisposable
     public event Action<DueAlert>? AlertDue;
     public event Action? Changed;
     public event Action? CheckInDue;
+    /// <summary>"morning" or "evening".</summary>
+    public event Action<string>? BriefDue;
 
     public AssistantEngine(AnchorSettings settings, StateStore store)
     {
@@ -43,11 +45,21 @@ public sealed class AssistantEngine : IDisposable
         BuildSources();
     }
 
+    public const string AnthropicKeyName = "anthropic";
     public AnchorSettings Settings => _settings;
+
+    public void SaveAnthropicKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) Tokens.Remove(AnthropicKeyName);
+        else Tokens.Set(AnthropicKeyName, new TokenSet { AccessToken = key.Trim(), ExpiresAt = DateTimeOffset.MaxValue });
+    }
+
+    public bool HasAnthropicKey => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")) || Tokens.Get(AnthropicKeyName) is not null;
 
     void BuildAi()
     {
         var key = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        if (string.IsNullOrWhiteSpace(key)) key = Tokens.Get(AnthropicKeyName)?.AccessToken; // saved via the settings window (DPAPI)
         if (string.IsNullOrWhiteSpace(key) || !_settings.Ai.Enabled) return;
         Claude = new ClaudeService(new AnthropicClient { ApiKey = key }, _settings.Ai, Budget);
     }
@@ -137,7 +149,7 @@ public sealed class AssistantEngine : IDisposable
     public void Tick(DateTimeOffset now)
     {
         var fired = Store.State.FiredAlerts;
-        var due = AlertScheduler.Evaluate(Store.State.CachedEvents, now, fired, _settings.AlertOffsetsMinutes);
+        var due = EvaluateAlerts(now, fired);
         foreach (var d in due)
         {
             var k = EventKey(d.Event);
@@ -147,7 +159,41 @@ public sealed class AssistantEngine : IDisposable
             AlertDue?.Invoke(d);
         }
 
-        if (CheckInIsDue(now)) { _lastCheckIn = now; CheckInDue?.Invoke(); }
+        if (BriefIsDue(now) is { } kind)
+        {
+            Store.Mutate(s => { if (kind == "morning") s.LastMorningBrief = now.ToString("yyyy-MM-dd"); else s.LastEveningBrief = now.ToString("yyyy-MM-dd"); });
+            BriefDue?.Invoke(kind);
+        }
+        else if (CheckInIsDue(now)) { _lastCheckIn = now; CheckInDue?.Invoke(); }
+    }
+
+    IReadOnlyList<DueAlert> EvaluateAlerts(DateTimeOffset now, IReadOnlySet<string> fired)
+    {
+        var events = Store.State.CachedEvents;
+        var offsets = _settings.AlertOffsetsMinutes;
+        if (_settings.InPersonLeadMinutes <= 0) return AlertScheduler.Evaluate(events, now, fired, offsets);
+
+        // In-person meetings get one extra, earlier alert so there is time to actually get there.
+        var inPerson = events.Where(IsInPerson).ToList();
+        var rest = events.Except(inPerson);
+        return AlertScheduler.Evaluate(rest, now, fired, offsets)
+            .Concat(AlertScheduler.Evaluate(inPerson, now, fired, offsets.Append(_settings.InPersonLeadMinutes).ToArray()))
+            .OrderBy(a => a.Event.Start).ToList();
+    }
+
+    public static bool IsInPerson(CalendarEvent e) =>
+        e.JoinUrl is null && !string.IsNullOrWhiteSpace(e.Location) && !e.Location.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+
+    string? BriefIsDue(DateTimeOffset now)
+    {
+        if (!_settings.BriefsEnabled || _activeAlerts.Count > 0 || now.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) return null;
+        if (!TimeOnly.TryParse(_settings.WorkdayStart, out var s) || !TimeOnly.TryParse(_settings.WorkdayEnd, out var e)) return null;
+        var t = TimeOnly.FromDateTime(now.LocalDateTime);
+        var today = now.ToString("yyyy-MM-dd");
+        var st = Store.State;
+        if (t >= e.AddMinutes(-30)) return t <= e.AddMinutes(60) && st.LastEveningBrief != today ? "evening" : null;
+        if (t >= s && st.LastMorningBrief != today) return "morning";
+        return null;
     }
 
     bool CheckInIsDue(DateTimeOffset now)
@@ -321,16 +367,16 @@ public sealed class AssistantEngine : IDisposable
 
     public void CheckInAnswered() => _lastCheckIn = DateTimeOffset.Now;
 
-    public async Task<string> PlanDayAsync()
+    public async Task<string> PlanDayAsync(bool eveningSweep = false)
     {
-        if (Claude is null) return "AI is off: set the ANTHROPIC_API_KEY environment variable and restart Anchor.";
+        if (Claude is null) return "AI is off: add your Anthropic API key in Settings and restart Anchor.";
         if (!Budget.Allow(background: false)) return "AI budget limit reached for this month. " + Budget.Summary;
         var now = DateTimeOffset.Now;
         var plan = await Claude.PlanDayAsync(
             Store.State.CachedEvents.Where(e => e.End > now && e.Start < now.AddHours(36)),
             Store.State.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).Take(12),
-            Store.State.CurrentTask, _cts.Token);
-        Store.Mutate(s => { s.LastPlan = plan; s.LastPlanAt = DateTimeOffset.Now; });
+            Store.State.CurrentTask, eveningSweep, _cts.Token);
+        if (!eveningSweep) Store.Mutate(s => { s.LastPlan = plan; s.LastPlanAt = DateTimeOffset.Now; });
         return plan;
     }
 
@@ -348,6 +394,8 @@ public sealed class AssistantEngine : IDisposable
         };
         if (st.Checkpoint.Length > 0) lines.Add($"Last note ({st.CheckpointAt?.LocalDateTime:HH:mm}): {st.Checkpoint}");
         lines.Add(next is null ? "No more meetings on the calendar." : $"Next: {next.Title} {AlertScheduler.Describe(next, now)} ({next.Start.LocalDateTime:HH:mm}).");
+        var overdue = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted && t.Due is { } d && d < now).ToList();
+        if (overdue.Count > 0) lines.Add($"Overdue: {string.Join("; ", overdue.Take(3).Select(t => t.Title))}");
         var top = st.Tasks.Where(t => t.Status == SuggestionStatus.Accepted || t.Status == SuggestionStatus.Pending).OrderByDescending(t => t.Confidence).FirstOrDefault();
         if (top is not null) lines.Add($"Open follow-up: {top.Title}");
         return string.Join(Environment.NewLine, lines);

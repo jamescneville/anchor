@@ -14,14 +14,21 @@ dotnet run --project src/Anchor.Desktop
 dotnet test
 ```
 
-First launch creates `%LOCALAPPDATA%\Anchor\settings.json`. Tray menu: Test alert, Start with Windows, Exit.
+First launch opens **Settings** (also in the tray menu). Everything below is editable there; it saves to
+`%LOCALAPPDATA%\Anchor\settings.json` and restarts Anchor. Tray menu: Settings, Test alert, Start with Windows, Exit.
+
+Install for daily use: `scripts\publish.ps1` (self-contained single exe in `dist\`) then `scripts\install.ps1`
+(copies to `%LOCALAPPDATA%\Programs\Anchor`, adds a Start Menu shortcut, starts with Windows).
+
+Other behaviour: morning plan at workday start and a wrap-up 30 min before it ends (weekdays); in-person
+meetings (a physical location, no join link) get an extra early alert (`InPersonLeadMinutes`, default 30).
 Use **Test alert** first to see what a meeting alert looks like.
 
 ## Connect things (all optional, each independent)
 
 | Source | What you do | Settings |
 |---|---|---|
-| **Claude** | `setx ANTHROPIC_API_KEY sk-ant-...`, restart Anchor | `Ai.*` (budget, models) |
+| **Claude** | Paste your key in Settings (stored encrypted via DPAPI), or set env `ANTHROPIC_API_KEY` | `Ai.*` (budget, models) |
 | **Google** (Gmail + all calendars, incl. Skylight's) | Google Cloud Console → new project → enable Gmail API + Calendar API → OAuth consent (External, add yourself as test user) → Credentials → OAuth client ID, type **Desktop app** | `Google.Enabled/ClientId/ClientSecret`, then press *Connect google* |
 | **Outlook / Teams** | Entra ID → App registrations → New, "Accounts in any org directory", platform **Mobile and desktop**, redirect `http://localhost`, delegated perms `Calendars.Read Mail.Read Chat.Read User.Read` | `Microsoft.Enabled/ClientId`, then *Connect microsoft* |
 | **Slack** | api.slack.com/apps → new app → User Token Scope `search:read` → install → copy `xoxp-` token | env `ANCHOR_SLACK_TOKEN` (preferred) or `Slack.UserToken` |

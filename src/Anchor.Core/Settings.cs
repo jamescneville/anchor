@@ -84,6 +84,10 @@ public sealed class AnchorSettings
     public int SnoozeMinutes { get; set; } = 2;
     public int CheckInMinutes { get; set; } = 30;
     public bool SpeakAlerts { get; set; } = true;
+    /// <summary>Extra early alert (minutes) for in-person meetings with a physical location, to leave time to travel.</summary>
+    public int InPersonLeadMinutes { get; set; } = 30;
+    /// <summary>Morning plan at workday start and a wrap-up sweep 30 min before it ends (weekdays).</summary>
+    public bool BriefsEnabled { get; set; } = true;
     /// <summary>Global "Where was I?" shortcut, e.g. "Ctrl+Space", "Ctrl+Shift+W", "Win+Shift+A".</summary>
     public string Hotkey { get; set; } = "Ctrl+Space";
     /// <summary>Local time, HH:mm. Focus check-ins only run inside this window on weekdays; meeting alerts always run.</summary>

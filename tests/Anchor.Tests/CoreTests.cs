@@ -175,3 +175,27 @@ public class HeuristicTests
     [Fact] public void Skips_noreply() => Assert.False(AssistantEngine.LooksActionable(Item("noreply@shop.com", "Your receipt", "please keep this")));
     [Fact] public void Skips_newsletters() => Assert.False(AssistantEngine.LooksActionable(Item("news@x.com", "Weekly digest", "click to unsubscribe")));
 }
+
+public class InPersonAndSettingsTests
+{
+    static CalendarEvent Ev(string? loc, string? join = null) =>
+        new("e", "Test", "Lunch", DateTimeOffset.Now.AddHours(1), DateTimeOffset.Now.AddHours(2), join, loc);
+
+    [Fact] public void Physical_location_without_link_is_in_person() => Assert.True(AssistantEngine.IsInPerson(Ev("Cafe Roma, 12 High St")));
+    [Fact] public void Video_meetings_are_not_in_person() => Assert.False(AssistantEngine.IsInPerson(Ev("https://zoom.us/j/1")));
+    [Fact] public void Meetings_with_a_join_link_are_not_in_person() => Assert.False(AssistantEngine.IsInPerson(Ev("Room 4", "https://teams.microsoft.com/x")));
+    [Fact] public void No_location_is_not_in_person() => Assert.False(AssistantEngine.IsInPerson(Ev(null)));
+
+    [Fact]
+    public void Settings_round_trip_through_json()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"anchor-settings-{Guid.NewGuid():N}.json");
+        var s = new AnchorSettings { AlertIntensity = "Maximum", Hotkey = "Ctrl+Shift+W" };
+        s.IcsFeeds.Add(new IcsFeed { Name = "Work", Url = "https://example.com/a.ics" });
+        s.Save(path);
+        var back = AnchorSettings.Load(path);
+        Assert.Equal("Maximum", back.AlertIntensity);
+        Assert.Equal("Ctrl+Shift+W", back.Hotkey);
+        Assert.Equal("Work", Assert.Single(back.IcsFeeds).Name);
+    }
+}

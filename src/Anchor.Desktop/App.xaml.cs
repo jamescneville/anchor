@@ -25,6 +25,12 @@ public partial class App : Application
     {
         base.OnStartup(e);
         _single = new Mutex(true, "Anchor.SingleInstance", out var first);
+        if (!first && e.Args.Contains("--restart"))
+        {
+            // Restarting from Settings: wait for the previous instance to exit and release the mutex.
+            try { first = _single.WaitOne(TimeSpan.FromSeconds(10)); }
+            catch (AbandonedMutexException) { first = true; }
+        }
         if (!first) { Shutdown(); return; }
 
         DispatcherUnhandledException += (_, ex) =>
@@ -38,6 +44,7 @@ public partial class App : Application
         _main = new MainWindow(_engine);
 
         _engine.AlertDue += a => Dispatcher.BeginInvoke(() => new AlertWindow(_engine, a).Show());
+        _engine.BriefDue += kind => Dispatcher.BeginInvoke(() => new BriefWindow(_engine, kind).Show());
         _engine.CheckInDue += () => Dispatcher.BeginInvoke(() => new RecoveryWindow(_engine, true).Show());
 
         SystemEvents.PowerModeChanged += (_, p) => { if (p.Mode == PowerModes.Resume) _engine.OnResume(); };
@@ -49,6 +56,8 @@ public partial class App : Application
         _engine.Start();
 
         if (!e.Args.Contains("--background")) _main.Show();
+        if (settings.Google is { Enabled: false } && settings.Microsoft is { Enabled: false } && settings.IcsFeeds.Count == 0)
+            new SettingsWindow(_engine).Show(); // first run: nothing connected yet
     }
 
     void RegisterHotkey()
@@ -91,6 +100,7 @@ public partial class App : Application
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Open Anchor", null, (_, _) => ShowMain());
         menu.Items.Add("Where was I?", null, (_, _) => new RecoveryWindow(_engine!, false).Show());
+        menu.Items.Add("Settings…", null, (_, _) => new SettingsWindow(_engine!).Show());
         menu.Items.Add("Test alert (meeting in 1 min)", null, (_, _) => _engine!.AddTestMeeting(1));
         var startup = new System.Windows.Forms.ToolStripMenuItem("Start with Windows") { Checked = IsAutoStart(), CheckOnClick = true };
         startup.CheckedChanged += (_, _) => SetAutoStart(startup.Checked);
