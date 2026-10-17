@@ -390,3 +390,46 @@ public class SettingsValidatorTests
         Assert.Empty(SettingsValidator.Check(good));
     }
 }
+
+public class BridgeEventTests
+{
+    static readonly DateTimeOffset Now = new(2026, 10, 19, 9, 0, 0, TimeSpan.FromHours(-4));
+
+    [Fact]
+    public void Parses_events_with_offsets_and_drops_out_of_range_and_blank_ones()
+    {
+        const string json = """
+            [
+              {"id":"a","title":"Standup","start":"2026-10-19T13:00:00-04:00","end":"2026-10-19T13:45:00-04:00","location":"Microsoft Teams Meeting","joinUrl":"https://teams.microsoft.com/l/x"},
+              {"id":"b","title":"Dentist","start":"2026-10-20T08:00:00-04:00","end":"2026-10-20T09:00:00-04:00","location":"12 High St"},
+              {"id":"c","title":"Too far","start":"2026-12-01T08:00:00-04:00"},
+              {"id":"d","title":"","start":"2026-10-19T10:00:00-04:00"},
+              {"id":"e","title":"Bad link","start":"2026-10-19T15:00:00-04:00","joinUrl":"file:///c:/x"}
+            ]
+            """;
+        var ev = Bridge.ParseEvents(json, Now);
+        Assert.Equal(["Standup", "Dentist", "Bad link"], ev.Select(e => e.Title));
+        Assert.All(ev, e => Assert.Equal(Bridge.EventSource, e.Source));
+        Assert.Null(ev[0].Location);                          // "Microsoft Teams Meeting" is not a place
+        Assert.Equal("12 High St", ev[1].Location);
+        Assert.Equal(TimeSpan.FromMinutes(45), ev[0].End - ev[0].Start);
+        Assert.Null(ev[2].JoinUrl);
+        Assert.Equal(TimeSpan.FromMinutes(30), ev[2].End - ev[2].Start); // default length
+    }
+
+    [Fact]
+    public void Garbage_yields_nothing() => Assert.Empty(Bridge.ParseEvents("nope", Now));
+
+    [Fact]
+    public void Teams_locations_are_not_in_person()
+    {
+        var e = new CalendarEvent("x", "S", "Sync", Now, Now.AddHours(1), null, "Microsoft Teams Meeting");
+        Assert.False(AssistantEngine.IsInPerson(e));
+        Assert.True(AssistantEngine.IsInPerson(e with { Location = "Building 5, Room 12" }));
+    }
+
+    [Fact]
+    public void Bridge_outlook_events_count_as_work_for_redaction() =>
+        Assert.Equal("Busy (work meeting)", Assert.Single(AiPrivacy.Events(
+            [new CalendarEvent("x", Bridge.EventSource, "Secret", Now, Now.AddHours(1))], allowWork: false, new HashSet<string>())).Title);
+}

@@ -178,11 +178,20 @@ public sealed class AssistantEngine : IDisposable
         {
             var plan = Bridge.ReadPlan(Bridge.Dir, out var at);
             var tasks = Bridge.ReadTasks(Bridge.Dir, DateTimeOffset.Now);
+            var events = Bridge.ReadEvents(Bridge.Dir, DateTimeOffset.Now);
+            var eventsAt = File.Exists(Path.Combine(Bridge.Dir, Bridge.EventsFile)) ? new DateTimeOffset(File.GetLastWriteTime(Path.Combine(Bridge.Dir, Bridge.EventsFile))) : (DateTimeOffset?)null;
             var changed = false;
             Store.Mutate(s =>
             {
                 if (plan is not null && (plan != s.BridgePlan || at != s.BridgePlanAt)) { s.BridgePlan = plan; s.BridgePlanAt = at; changed = true; }
                 foreach (var t in tasks.Where(t => s.Tasks.All(x => x.Id != t.Id))) { s.Tasks.Add(t); changed = true; }
+                if (eventsAt is not null && eventsAt != s.BridgeEventsAt)
+                {
+                    s.BridgeEvents = events.ToList(); s.BridgeEventsAt = eventsAt;
+                    // Swap them into the live calendar right away so alerts and the agenda update without waiting for a refresh.
+                    s.CachedEvents = Dedupe(s.CachedEvents.Where(e => e.Source != Bridge.EventSource).Concat(events)).ToList();
+                    changed = true;
+                }
             });
             SourceErrors.Remove("Claude bridge");
             if (changed) Changed?.Invoke();
@@ -249,7 +258,8 @@ public sealed class AssistantEngine : IDisposable
     }
 
     public static bool IsInPerson(CalendarEvent e) =>
-        e.JoinUrl is null && !string.IsNullOrWhiteSpace(e.Location) && !e.Location.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+        e.JoinUrl is null && !string.IsNullOrWhiteSpace(e.Location) && !e.Location.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
+        !new[] { "teams", "zoom", "meet", "webex", "online", "virtual", "call" }.Any(w => e.Location.Contains(w, StringComparison.OrdinalIgnoreCase));
 
     string? BriefIsDue(DateTimeOffset now)
     {
@@ -337,9 +347,9 @@ public sealed class AssistantEngine : IDisposable
         // A failing source keeps its last good events so alerts survive an outage.
         var keep = Store.State.CachedEvents.Where(e => failed.Any(f => e.Source.StartsWith(f, StringComparison.OrdinalIgnoreCase)) && e.End > from);
         _testEvents.RemoveAll(e => e.End < DateTimeOffset.Now);
-        var merged = Dedupe(fresh.Concat(keep).Concat(_testEvents)).Where(e => e.End > from && e.Start < to).ToList();
+        var merged = Dedupe(fresh.Concat(keep.Where(e => e.Source != Bridge.EventSource)).Concat(_testEvents).Concat(Store.State.BridgeEvents)).Where(e => e.End > from && e.Start < to).ToList();
 
-        if (_calendars.Count > 0 || _testEvents.Count > 0)
+        if (_calendars.Count > 0 || _testEvents.Count > 0 || Store.State.BridgeEvents.Count > 0)
             Store.Mutate(s => { s.CachedEvents = merged; if (failed.Count < _calendars.Count) s.EventsRefreshed = DateTimeOffset.Now; });
     }
 

@@ -7,9 +7,9 @@ namespace Anchor.Core.AI;
 public static class AiPrivacy
 {
     public static bool IsWorkSource(string source, IReadOnlySet<string> workIcsSources) =>
-        source.StartsWith("Outlook", StringComparison.OrdinalIgnoreCase) ||
-        source.StartsWith("Teams", StringComparison.OrdinalIgnoreCase) ||
-        source.StartsWith("Slack", StringComparison.OrdinalIgnoreCase) ||
+        source.Contains("Outlook", StringComparison.OrdinalIgnoreCase) ||
+        source.Contains("Teams", StringComparison.OrdinalIgnoreCase) ||
+        source.Contains("Slack", StringComparison.OrdinalIgnoreCase) ||
         workIcsSources.Contains(source);
 
     /// <summary>Work meetings keep their times (so the plan respects them) but lose title, location and link.</summary>

@@ -27,6 +27,10 @@ public sealed class AnchorState
     public string? BridgePlan { get; set; }
     public DateTimeOffset? BridgePlanAt { get; set; }
 
+    /// <summary>Calendar events dropped into the bridge by Claude desktop (work Outlook via the Microsoft 365 connector).</summary>
+    public List<CalendarEvent> BridgeEvents { get; set; } = new();
+    public DateTimeOffset? BridgeEventsAt { get; set; }
+
     public string? LastPlan { get; set; }
     public DateTimeOffset? LastPlanAt { get; set; }
 }
