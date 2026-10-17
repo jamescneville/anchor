@@ -46,12 +46,16 @@ function Render([int]$n, [string]$variant) {
         $bg = New-Object System.Drawing.Drawing2D.LinearGradientBrush ((New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF 256, 256), (Col '#6FA8FF'), (Col '#6B4DFF'))
     }
     $g.FillPath($bg, $tile)
-    # soft top highlight
-    $hl = New-Object System.Drawing.Drawing2D.LinearGradientBrush ((New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF 0, 140), (Col '#FFFFFF' 46), (Col '#FFFFFF' 0))
-    $g.SetClip($tile); $g.FillRectangle($hl, 0, 0, 256, 140); $g.ResetClip()
-    # hairline inner border
-    $edge = New-Object System.Drawing.Pen (Col '#FFFFFF' 40), 2.5
-    $g.DrawPath($edge, (RoundedRect 5.5 5.5 245 245 56.5))
+    $tiny = $n -le 32                                                                  # small sizes: bolder anchor, no gloss, so it stays crisp
+    if (-not $tiny) {
+        # soft top highlight
+        $hl = New-Object System.Drawing.Drawing2D.LinearGradientBrush ((New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF 0, 140), (Col '#FFFFFF' 46), (Col '#FFFFFF' 0))
+        $g.SetClip($tile); $g.FillRectangle($hl, 0, 0, 256, 140); $g.ResetClip()
+        # hairline inner border
+        $edge = New-Object System.Drawing.Pen (Col '#FFFFFF' 40), 2.5
+        $g.DrawPath($edge, (RoundedRect 5.5 5.5 245 245 56.5))
+    }
+    $penW = if ($tiny) { 27 } elseif ($n -le 64) { 21 } else { 16 }
 
     if ($variant -eq 'A') {
         # glow: draw a fat translucent anchor on its own layer, blur by down/up-sampling, composite under the crisp one
@@ -68,11 +72,13 @@ function Render([int]$n, [string]$variant) {
         $stroke = New-Object System.Drawing.Drawing2D.LinearGradientBrush ((New-Object System.Drawing.PointF 128, 30), (New-Object System.Drawing.PointF 128, 220), (Col '#FFFFFF'), (Col '#8FD6FF'))
         $fillB = $stroke
     } else {
-        $shadow = New-Object System.Drawing.Pen (Col '#1A1050' 90), 17; $shadow.StartCap = 'Round'; $shadow.EndCap = 'Round'
-        $g.TranslateTransform(0, 7); DrawAnchor $g $shadow (New-Object System.Drawing.SolidBrush (Col '#1A1050' 90)); $g.TranslateTransform(0, -7)
+        if (-not $tiny) {
+            $shadow = New-Object System.Drawing.Pen (Col '#1A1050' 90), ($penW + 1); $shadow.StartCap = 'Round'; $shadow.EndCap = 'Round'
+            $g.TranslateTransform(0, 7); DrawAnchor $g $shadow (New-Object System.Drawing.SolidBrush (Col '#1A1050' 90)); $g.TranslateTransform(0, -7)
+        }
         $stroke = New-Object System.Drawing.SolidBrush (Col '#FFFFFF'); $fillB = $stroke
     }
-    $pen = New-Object System.Drawing.Pen $stroke, 16; $pen.StartCap = 'Round'; $pen.EndCap = 'Round'; $pen.LineJoin = 'Round'
+    $pen = New-Object System.Drawing.Pen $stroke, $penW; $pen.StartCap = 'Round'; $pen.EndCap = 'Round'; $pen.LineJoin = 'Round'
     DrawAnchor $g $pen $fillB
     $g.Dispose()
 
@@ -109,5 +115,5 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 }
 foreach ($p in $pngs) { $bw.Write($p) }
 $bw.Close(); $fs.Close()
-(Render 256 $Variant).Save((Join-Path $dir 'anchor-preview.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+(Render 256 $Variant).Save((Join-Path $dir 'anchor-256.png'), [System.Drawing.Imaging.ImageFormat]::Png)   # crisp source for in-app logos
 Write-Host "Wrote $Out (variant $Variant)"

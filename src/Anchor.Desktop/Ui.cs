@@ -17,6 +17,19 @@ public static class Ui
     static System.Windows.Media.Imaging.BitmapFrame? _icon;
     public static System.Windows.Media.Imaging.BitmapFrame AppIcon => _icon ??= System.Windows.Media.Imaging.BitmapFrame.Create(IconUri);
 
+    /// <summary>Large source image for logos drawn inside the app; scaling it down keeps it crisp (unlike the first, 16px, ICO frame).</summary>
+    public static readonly System.Windows.Media.Imaging.BitmapImage Logo = LoadLogo();
+    static System.Windows.Media.Imaging.BitmapImage LoadLogo()
+    {
+        var b = new System.Windows.Media.Imaging.BitmapImage();
+        b.BeginInit();
+        b.UriSource = new Uri("pack://application:,,,/Assets/anchor-256.png");
+        b.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+        b.EndInit();
+        b.Freeze();
+        return b;
+    }
+
     public static Brush B(string key) => (Brush)Application.Current.Resources[key];
 
     /// <summary>Dark title bar, rounded corners and a Mica backdrop (Windows 11 22621+); harmless no-op elsewhere.</summary>

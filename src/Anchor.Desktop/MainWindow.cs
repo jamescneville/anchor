@@ -50,7 +50,7 @@ public sealed class MainWindow : Window
         var titleText = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
         titleText.Children.Add(new TextBlock { Text = "Anchor", FontSize = 20, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
         titleText.Children.Add(_date);
-        var logo = new Image { Source = Ui.AppIcon, Width = 34, Height = 34, VerticalAlignment = VerticalAlignment.Center };
+        var logo = new Image { Source = Ui.Logo, Width = 36, Height = 36, VerticalAlignment = VerticalAlignment.Center };
         RenderOptions.SetBitmapScalingMode(logo, BitmapScalingMode.HighQuality);
         var titleBox = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 22, 0), Children = { logo, titleText } };
         DockPanel.SetDock(titleBox, Dock.Left);

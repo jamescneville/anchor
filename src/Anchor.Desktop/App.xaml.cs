@@ -125,7 +125,7 @@ public partial class App : Application
 
         _tray = new System.Windows.Forms.NotifyIcon
         {
-            Icon = new System.Drawing.Icon(GetResourceStream(Ui.IconUri)!.Stream),
+            Icon = new System.Drawing.Icon(GetResourceStream(Ui.IconUri)!.Stream, System.Windows.Forms.SystemInformation.SmallIconSize),
             Text = "Anchor",
             Visible = true,
             ContextMenuStrip = menu,

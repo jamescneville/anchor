@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\anchor.ico" />
+    <Resource Include="Assets/anchor-256.png" />
   </ItemGroup>
 
   <ItemGroup>
