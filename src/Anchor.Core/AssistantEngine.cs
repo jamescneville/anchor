@@ -202,7 +202,7 @@ public sealed class AssistantEngine : IDisposable
         Store.Mutate(s =>
         {
             if (!s.Todos.Any(t => t.DoneAt is null && t.Title == title)) s.Todos.Add(new TodoItem { Title = title, Link = link, Source = source });
-            if (sweepId is not null) s.SweepHandled.Add(sweepId);
+            if (sweepId is not null) { s.SweepHandled.Add(sweepId); s.SweepHow[sweepId] = "today"; }
         });
         Changed?.Invoke();
     }
@@ -215,12 +215,35 @@ public sealed class AssistantEngine : IDisposable
 
     public void RemoveTodo(string id) { Store.Mutate(s => s.Todos.RemoveAll(t => t.Id == id)); Changed?.Invoke(); }
 
-    public void HandleSweepItem(string id) { Store.Mutate(s => s.SweepHandled.Add(id)); Changed?.Invoke(); }
+    public void HandleSweepItem(string id) { Store.Mutate(s => { s.SweepHandled.Add(id); s.SweepHow[id] = "handled"; }); Changed?.Invoke(); }
+
+    /// <summary>Items set aside (handled, put on today's list, or trashed), with how, newest sweep order.</summary>
+    public IReadOnlyList<(SweepItem Item, string How, bool Queued)> SetAsideSweepItems() =>
+        (Store.State.Sweep?.Items ?? []).Where(i => Store.State.SweepHandled.Contains(i.Id))
+            .Select(i => (i, Store.State.SweepHow.GetValueOrDefault(i.Id, "handled"), Store.State.TrashQueue.Contains(i.Id)))
+            .OrderBy(x => x.i.Priority).ToList();
+
+    /// <summary>Puts a set-aside item back in the open list. A queued trash is cancelled; a today's-list entry made from it is removed.</summary>
+    public void RestoreSweepItem(string id)
+    {
+        var item = Store.State.Sweep?.Items.FirstOrDefault(i => i.Id == id);
+        var wasQueued = false;
+        Store.Mutate(s =>
+        {
+            s.SweepHandled.Remove(id);
+            var how = s.SweepHow.GetValueOrDefault(id, "");
+            s.SweepHow.Remove(id);
+            wasQueued = s.TrashQueue.Remove(id);
+            if (how == "today" && item is not null) s.Todos.RemoveAll(t => t.DoneAt is null && t.Title == item.Title && t.Source == "Inbox sweep");
+        });
+        if (wasQueued) { try { Bridge.WriteActions(Bridge.Dir, Store.State.TrashQueue); } catch (Exception ex) { SourceErrors["Sweep"] = ex.Message; } }
+        Changed?.Invoke();
+    }
 
     /// <summary>Asks Claude to move the message to Deleted Items (recoverable). Anchor has no mailbox access itself, so it is queued in the bridge folder.</summary>
     public void QueueTrash(string id)
     {
-        Store.Mutate(s => { s.SweepHandled.Add(id); if (!s.TrashQueue.Contains(id)) s.TrashQueue.Add(id); });
+        Store.Mutate(s => { s.SweepHandled.Add(id); s.SweepHow[id] = "trash"; if (!s.TrashQueue.Contains(id)) s.TrashQueue.Add(id); });
         try { Bridge.WriteActions(Bridge.Dir, Store.State.TrashQueue); } catch (Exception ex) { SourceErrors["Sweep"] = ex.Message; }
         Changed?.Invoke();
     }
@@ -265,7 +288,7 @@ public sealed class AssistantEngine : IDisposable
             res.GeneratedAt = DateTimeOffset.Now;
             // Also write the file, so an older sweep.json from a scheduled run is not mistaken for something newer.
             try { File.WriteAllText(Path.Combine(Bridge.Dir, Bridge.SweepFile), System.Text.Json.JsonSerializer.Serialize(res, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase })); } catch { /* state still has it */ }
-            Store.Mutate(s => { s.Sweep = res; s.SweepHandled.Clear(); });
+            Store.Mutate(s => { s.Sweep = res; s.SweepHandled.Clear(); s.SweepHow.Clear(); });
             SweepStatus = null; SourceErrors.Remove("Sweep");
             return $"Found {res.Items.Count} loose ends.";
         }

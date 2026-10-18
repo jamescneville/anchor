@@ -35,6 +35,8 @@ public sealed class AnchorState
     /// <summary>Sweep items the user has dealt with (done, dismissed, queued for trash, or moved to the to-do list).</summary>
     public HashSet<string> SweepHandled { get; set; } = new();
     public List<string> TrashQueue { get; set; } = new();
+    /// <summary>How each handled sweep item was set aside: handled | today | trash.</summary>
+    public Dictionary<string, string> SweepHow { get; set; } = new();
     public List<TodoItem> Todos { get; set; } = new();
     public List<KnownCalendar> KnownCalendars { get; set; } = new();
     public DateTimeOffset? BridgeEventsAt { get; set; }
