@@ -91,3 +91,7 @@ tests/Anchor.Tests   scheduler (sleep/wake, snooze, reschedule), ICS recurrence,
 - Slack uses search (DMs + @mentions) rather than channel history.
 - ICS recurrence supports DAILY/WEEKLY(BYDAY)/MONTHLY/YEARLY only.
 - Read-only everywhere: Anchor never sends, replies or edits anything.
+
+## Inbox sweep and today's list
+
+The on-demand Claude task `anchor-inbox-sweep` (Sonnet) reads the last 45 days of the Outlook inbox, drops anything already replied to, ranks the loose ends and writes `bridge\sweep.json`. The envelope icon in Anchor opens the sweep window: Open in Outlook, **+ Today** (adds to the to-do list on the main window), Handled, or **Trash**, which queues the message id in `bridge\sweep-actions.json`; Claude moves it to Deleted Items (recoverable) on its next run. Anchor itself has no mailbox access.

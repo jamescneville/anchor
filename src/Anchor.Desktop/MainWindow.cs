@@ -65,10 +65,12 @@ public sealed class MainWindow : Window
         where.Click += (_, _) => new RecoveryWindow(_engine, false).Show();
         var refresh = Ui.IconButton("\uE72C", "Refresh calendars and mail now");
         refresh.Click += (_, _) => _ = _engine.RefreshAllAsync(forceMessages: true);
+        var sweep = Ui.IconButton("\uE715", "Inbox sweep: every loose end in your mail, ranked");
+        sweep.Click += (_, _) => new SweepWindow(_engine).Show();
         var settings = Ui.IconButton("\uE713", "Settings");
         settings.Click += (_, _) => new SettingsWindow(_engine).Show();
         settings.Margin = new Thickness(0);
-        actions.Children.Add(where); actions.Children.Add(refresh); actions.Children.Add(settings);
+        actions.Children.Add(where); actions.Children.Add(sweep); actions.Children.Add(refresh); actions.Children.Add(settings);
         DockPanel.SetDock(actions, Dock.Right);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(actions, true);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(_chips, true);
@@ -102,7 +104,7 @@ public sealed class MainWindow : Window
         agendaDock.Children.Add(agendaHead);
         agendaDock.Children.Add(_agendaHost);
         var left = Ui.Card(agendaDock);
-        var right = Ui.Card(Scroll("Needs attention", _tasks));
+        var right = Ui.Card(Scroll("To do", _tasks));
         Grid.SetColumn(left, 0); Grid.SetColumn(right, 2);
         cols.Children.Add(left); cols.Children.Add(right);
         Grid.SetRow(cols, 2);
@@ -459,12 +461,66 @@ public sealed class MainWindow : Window
         var st = _engine.Store.State;
         var open = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)
                            .OrderByDescending(t => t.Status == SuggestionStatus.Accepted).ThenByDescending(t => t.Confidence).ToList();
-        if (open.Count == 0)
+        RenderTodos();
+        if (open.Count == 0 && _engine.TodayTodos(DateTimeOffset.Now).Count == 0)
         {
             _tasks.Children.Add(Empty("You're clear", "Anything that needs a reply or action shows up here after each mail and chat refresh."));
             return;
         }
+        if (open.Count > 0)
+        {
+            var l = Ui.Label("Needs attention"); l.Margin = new Thickness(2, 6, 0, 8);
+            _tasks.Children.Add(l);
+        }
         foreach (var t in open) _tasks.Children.Add(TaskRow(t));
+    }
+
+    /// <summary>Today's to-do list: things I chose to do today (from the inbox sweep or typed here).</summary>
+    void RenderTodos()
+    {
+        var now = DateTimeOffset.Now;
+        var todos = _engine.TodayTodos(now);
+        var head = Ui.Label($"Today's list{(todos.Count > 0 ? $" · {todos.Count(t => t.DoneAt is null)} left" : "")}");
+        head.Margin = new Thickness(2, 0, 0, 8);
+        _tasks.Children.Add(head);
+
+        foreach (var t in todos)
+        {
+            var done = t.DoneAt is not null;
+            var check = new Button { Content = done ? "\uE73E" : "\uEA3A", Width = 30, Height = 30, Padding = new Thickness(0), Margin = new Thickness(0, 0, 10, 0), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 15, ToolTip = done ? "Mark not done" : "Done", Foreground = done ? Ui.B("Ok") : Ui.B("Dim") };
+            check.Click += (_, _) => _engine.SetTodoDone(t.Id, !done);
+            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            text.Children.Add(new TextBlock { Text = t.Title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextDecorations = done ? TextDecorations.Strikethrough : null, Opacity = done ? 0.5 : 1 });
+            if (t.Source.Length > 0 && !done) text.Children.Add(new TextBlock { Text = t.Source, FontSize = 11.5, Foreground = Ui.B("Dim") });
+            var tools = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            if (Bridge.SafeLink(t.Link) is { } link && !done)
+            {
+                var o = Ui.Ghost("Open"); o.Foreground = Ui.B("Accent");
+                o.Click += (_, _) => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true });
+                tools.Children.Add(o);
+            }
+            var x = new Button { Content = "\uE711", Width = 28, Height = 28, Padding = new Thickness(0), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 11, ToolTip = "Remove from today's list", Foreground = Ui.B("Dim"), Margin = new Thickness(0) };
+            x.Click += (_, _) => _engine.RemoveTodo(t.Id);
+            tools.Children.Add(x);
+            var g = new Grid();
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(text, 1); Grid.SetColumn(tools, 2);
+            g.Children.Add(check); g.Children.Add(text); g.Children.Add(tools);
+            _tasks.Children.Add(new Border { Background = Ui.B("CardRaised"), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 6), Child = g });
+        }
+
+        var add = new TextBox { Height = 36, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 12), ToolTip = "Type something to do today and press Enter" };
+        var hint = new TextBlock { Text = "+ Add to today's list", Foreground = Ui.B("Dim"), IsHitTestVisible = false, Margin = new Thickness(13, 9, 0, 0), FontSize = 13 };
+        add.TextChanged += (_, _) => hint.Visibility = add.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        add.KeyDown += (_, e) =>
+        {
+            if (e.Key != System.Windows.Input.Key.Enter || add.Text.Trim().Length == 0) return;
+            e.Handled = true;
+            _engine.AddTodo(add.Text, null, "Added by me");
+        };
+        _tasks.Children.Add(new Grid { Children = { add, hint } });
     }
 
     void RenderPlan()

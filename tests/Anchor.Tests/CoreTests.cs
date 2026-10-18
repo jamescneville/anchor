@@ -659,3 +659,28 @@ public class CalendarModeTests
         Assert.Equal(CalMode.ViewOnly, CalendarPrefs.ModeOf(AnchorSettings.Load(path), "Google/X"));
     }
 }
+
+public class SweepTests
+{
+    const string Json = """
+    {"generatedAt":"2026-10-17T20:00:00-04:00","scanned":120,"scope":"Inbox, last 45 days","items":[
+      {"id":"A1","title":"Reply to Dana about pricing","from":"Dana","received":"2026-09-20T10:00:00-04:00","link":"https://outlook.office365.com/owa/?ItemID=A1&exvsurl=1&viewmodel=ReadMessageItem","category":"Reply","priority":1,"why":"She asked twice.","action":"Send the quote"},
+      {"id":"A1","title":"duplicate","priority":2},
+      {"id":"B2","title":"Bad link","link":"file:///c:/x","priority":9},
+      {"title":"no id"}
+    ]}
+    """;
+
+    [Fact]
+    public void Parses_ranks_dedupes_and_sanitises()
+    {
+        var r = Bridge.ParseSweep(Json, DateTimeOffset.Now)!;
+        Assert.Equal(120, r.Scanned);
+        Assert.Equal(2, r.Items.Count);
+        Assert.StartsWith("https://outlook.office.com/mail/deeplink/read/", r.Items[0].Link);
+        Assert.Equal(5, r.Items[1].Priority);       // clamped
+        Assert.Null(r.Items[1].Link);               // file: rejected
+    }
+
+    [Fact] public void Garbage_is_ignored() => Assert.Null(Bridge.ParseSweep("not json", DateTimeOffset.Now));
+}

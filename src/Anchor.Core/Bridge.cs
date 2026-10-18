@@ -13,6 +13,9 @@ public static class Bridge
     public const string TasksFile = "tasks.json";
     public const string EventsFile = "events.json";
     public const string UsageFile = "usage.json";
+    public const string SweepFile = "sweep.json";
+    /// <summary>Anchor's only write into the bridge: message ids the user asked to move to Deleted Items. The next Claude run does it.</summary>
+    public const string ActionsFile = "sweep-actions.json";
     /// <summary>Source label for calendar events dropped by Claude. Contains the product name so work redaction applies.</summary>
     public const string EventSource = "Claude/Outlook";
     const int MaxBytes = 200_000;
@@ -49,6 +52,57 @@ public static class Bridge
         var f = Path.Combine(dir, EventsFile);
         if (!File.Exists(f) || new FileInfo(f).Length > MaxBytes) return [];
         return ParseEvents(ReadShared(f), now);
+    }
+
+    public static SweepResult? ReadSweep(string dir)
+    {
+        var f = Path.Combine(dir, SweepFile);
+        return File.Exists(f) && new FileInfo(f).Length <= 2_000_000 ? ParseSweep(ReadShared(f), DateTimeOffset.Now) : null;
+    }
+
+    /// <summary>sweep.json: {"generatedAt","scanned","scope","items":[{"id","title","from","received","link","category","priority","why","action","due"}]}.</summary>
+    public static SweepResult? ParseSweep(string json, DateTimeOffset now)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+            var r = doc.RootElement;
+            var arr = r.ValueKind == JsonValueKind.Array ? r : r.ValueKind == JsonValueKind.Object && r.TryGetProperty("items", out var t) && t.ValueKind == JsonValueKind.Array ? t : default;
+            if (arr.ValueKind != JsonValueKind.Array) return null;
+            var res = new SweepResult { GeneratedAt = now };
+            if (r.ValueKind == JsonValueKind.Object)
+            {
+                if (r.TryGetProperty("generatedAt", out var g) && g.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(g.GetString(), out var gv)) res.GeneratedAt = gv;
+                if (r.TryGetProperty("scanned", out var sc) && sc.TryGetInt32(out var sn)) res.Scanned = sn;
+                res.Scope = Str(r, "scope", 120);
+            }
+            var seen = new HashSet<string>();
+            foreach (var e in arr.EnumerateArray().Take(500))
+            {
+                if (e.ValueKind != JsonValueKind.Object) continue;
+                var title = Str(e, "title", 160);
+                var id = Str(e, "id", 512);
+                if (title.Length == 0 || id.Length == 0 || !seen.Add(id)) continue;
+                DateTimeOffset? Date(string n) => e.TryGetProperty(n, out var d) && d.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(d.GetString(), out var dv) ? dv : null;
+                var pri = e.TryGetProperty("priority", out var p) && p.TryGetInt32(out var pv) ? Math.Clamp(pv, 1, 5) : 3;
+                var cat = Str(e, "category", 20);
+                res.Items.Add(new SweepItem
+                {
+                    Id = id, Title = title, From = Str(e, "from", 80), Received = Date("received"), Due = Date("due"),
+                    Link = SafeLink(Str(e, "link", 800)), Category = cat.Length > 0 ? cat : "Other", Priority = pri,
+                    Why = Str(e, "why", 240), Action = Str(e, "action", 160),
+                });
+            }
+            return res;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>Writes the pending trash requests (ids only). Claude executes them as a soft delete on its next run.</summary>
+    public static void WriteActions(string dir, IEnumerable<string> trashIds)
+    {
+        var list = trashIds.Select(i => new { action = "trash", id = i }).ToList();
+        File.WriteAllText(Path.Combine(dir, ActionsFile), JsonSerializer.Serialize(list));
     }
 
     public static ClaudeUsage? ReadUsage(string dir)

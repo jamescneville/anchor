@@ -71,6 +71,7 @@ public partial class App : Application
             });
         if (e.Args.Contains("--recovery")) new RecoveryWindow(_engine, false).Show();
         if (e.Args.Contains("--brief")) new BriefWindow(_engine, "morning").Show();
+        if (e.Args.Contains("--sweep")) new SweepWindow(_engine).Show();
         if (e.Args.Contains("--settings")) new SettingsWindow(_engine).Show();
         if (settings.Google is { Enabled: false } && settings.Microsoft is { Enabled: false } && settings.IcsFeeds.Count == 0)
             new SettingsWindow(_engine).Show(); // first run: nothing connected yet

@@ -31,6 +31,11 @@ public sealed class AnchorState
     public List<CalendarEvent> BridgeEvents { get; set; } = new();
     public ClaudeUsage? AccountUsage { get; set; }
     public List<DoneItem> Done { get; set; } = new();
+    public SweepResult? Sweep { get; set; }
+    /// <summary>Sweep items the user has dealt with (done, dismissed, queued for trash, or moved to the to-do list).</summary>
+    public HashSet<string> SweepHandled { get; set; } = new();
+    public List<string> TrashQueue { get; set; } = new();
+    public List<TodoItem> Todos { get; set; } = new();
     public List<KnownCalendar> KnownCalendars { get; set; } = new();
     public DateTimeOffset? BridgeEventsAt { get; set; }
 

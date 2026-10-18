@@ -53,3 +53,37 @@ public interface IMessageSource
     bool IsWork { get; }
     Task<IReadOnlyList<InboxItem>> GetRecentAsync(DateTimeOffset since, CancellationToken ct);
 }
+
+/// <summary>One loose end found by the inbox sweep. Priority 1 (most pressing) to 5.</summary>
+public sealed class SweepItem
+{
+    public string Id { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string From { get; set; } = "";
+    public DateTimeOffset? Received { get; set; }
+    public string? Link { get; set; }
+    public string Category { get; set; } = "Other";
+    public int Priority { get; set; } = 3;
+    public string Why { get; set; } = "";
+    public string Action { get; set; } = "";
+    public DateTimeOffset? Due { get; set; }
+}
+
+public sealed class SweepResult
+{
+    public DateTimeOffset GeneratedAt { get; set; }
+    public int Scanned { get; set; }
+    public string Scope { get; set; } = "";
+    public List<SweepItem> Items { get; set; } = new();
+}
+
+/// <summary>An entry on today's to-do list (shown on the main window).</summary>
+public sealed class TodoItem
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Title { get; set; } = "";
+    public string? Link { get; set; }
+    public string Source { get; set; } = "";
+    public DateTimeOffset Added { get; set; } = DateTimeOffset.Now;
+    public DateTimeOffset? DoneAt { get; set; }
+}

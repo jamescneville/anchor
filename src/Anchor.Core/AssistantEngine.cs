@@ -182,6 +182,49 @@ public sealed class AssistantEngine : IDisposable
         catch (Exception ex) { SourceErrors["Claude bridge"] = ex.Message; }
     }
 
+    // ---------------------------------------------------------------- inbox sweep + today's list
+
+    public SweepResult? Sweep => Store.State.Sweep;
+
+    /// <summary>Sweep items still open, most pressing first (priority, then oldest).</summary>
+    public IReadOnlyList<SweepItem> OpenSweepItems() =>
+        (Store.State.Sweep?.Items ?? []).Where(i => !Store.State.SweepHandled.Contains(i.Id))
+            .OrderBy(i => i.Priority).ThenBy(i => i.Received ?? DateTimeOffset.MaxValue).ToList();
+
+    public IReadOnlyList<TodoItem> TodayTodos(DateTimeOffset now) =>
+        Store.State.Todos.Where(t => t.DoneAt is null || t.DoneAt.Value.LocalDateTime.Date == now.LocalDateTime.Date)
+            .OrderBy(t => t.DoneAt is not null).ThenBy(t => t.Added).ToList();
+
+    public void AddTodo(string title, string? link = null, string source = "", string? sweepId = null)
+    {
+        title = title.Trim();
+        if (title.Length == 0) return;
+        Store.Mutate(s =>
+        {
+            if (!s.Todos.Any(t => t.DoneAt is null && t.Title == title)) s.Todos.Add(new TodoItem { Title = title, Link = link, Source = source });
+            if (sweepId is not null) s.SweepHandled.Add(sweepId);
+        });
+        Changed?.Invoke();
+    }
+
+    public void SetTodoDone(string id, bool done)
+    {
+        Store.Mutate(s => { if (s.Todos.FirstOrDefault(t => t.Id == id) is { } t) t.DoneAt = done ? DateTimeOffset.Now : null; });
+        Changed?.Invoke();
+    }
+
+    public void RemoveTodo(string id) { Store.Mutate(s => s.Todos.RemoveAll(t => t.Id == id)); Changed?.Invoke(); }
+
+    public void HandleSweepItem(string id) { Store.Mutate(s => s.SweepHandled.Add(id)); Changed?.Invoke(); }
+
+    /// <summary>Asks Claude to move the message to Deleted Items (recoverable). Anchor has no mailbox access itself, so it is queued in the bridge folder.</summary>
+    public void QueueTrash(string id)
+    {
+        Store.Mutate(s => { s.SweepHandled.Add(id); if (!s.TrashQueue.Contains(id)) s.TrashQueue.Add(id); });
+        try { Bridge.WriteActions(Bridge.Dir, Store.State.TrashQueue); } catch (Exception ex) { SourceErrors["Sweep"] = ex.Message; }
+        Changed?.Invoke();
+    }
+
     /// <summary>Reads plan.md and tasks.json written by Claude desktop. Existing tasks keep their status.</summary>
     public void IngestBridge()
     {
@@ -191,11 +234,15 @@ public sealed class AssistantEngine : IDisposable
             var tasks = Bridge.ReadTasks(Bridge.Dir, DateTimeOffset.Now);
             var events = Bridge.ReadEvents(Bridge.Dir, DateTimeOffset.Now);
             var usage = Bridge.ReadUsage(Bridge.Dir);
+            var sweep = Bridge.ReadSweep(Bridge.Dir);
             var eventsAt = File.Exists(Path.Combine(Bridge.Dir, Bridge.EventsFile)) ? new DateTimeOffset(File.GetLastWriteTime(Path.Combine(Bridge.Dir, Bridge.EventsFile))) : (DateTimeOffset?)null;
             var changed = false;
             Store.Mutate(s =>
             {
                 if (usage is not null && usage != s.AccountUsage) { s.AccountUsage = usage; changed = true; }
+                if (sweep is not null && sweep.GeneratedAt != s.Sweep?.GeneratedAt) { s.Sweep = sweep; changed = true; }
+                // Claude empties sweep-actions.json once it has moved the queued messages.
+                if (s.TrashQueue.Count > 0 && !(File.Exists(Path.Combine(Bridge.Dir, Bridge.ActionsFile)) && File.ReadAllText(Path.Combine(Bridge.Dir, Bridge.ActionsFile)).Contains("\"id\""))) { s.TrashQueue.Clear(); changed = true; }
                 if (plan is not null && (plan != s.BridgePlan || at != s.BridgePlanAt)) { s.BridgePlan = plan; s.BridgePlanAt = at; changed = true; }
                 foreach (var t in tasks.Where(t => s.Tasks.All(x => x.Id != t.Id))) { s.Tasks.Add(t); changed = true; }
                 if (eventsAt is not null && eventsAt != s.BridgeEventsAt)

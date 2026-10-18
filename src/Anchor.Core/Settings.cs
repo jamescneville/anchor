@@ -9,7 +9,7 @@ public static class AppPaths
     {
         get
         {
-            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Anchor");
+            var d = Environment.GetEnvironmentVariable("ANCHOR_DATA_DIR") is { Length: > 0 } o ? o : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Anchor");
             Directory.CreateDirectory(d);
             return d;
         }
