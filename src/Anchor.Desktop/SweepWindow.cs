@@ -29,7 +29,7 @@ public sealed class SweepWindow : Window
         Ui.Style(this);
         System.Windows.Shell.WindowChrome.SetWindowChrome(this, new System.Windows.Shell.WindowChrome
         {
-            CaptionHeight = 56, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0, 0, 0, 1),
+            CaptionHeight = 60, ResizeBorderThickness = new Thickness(8), GlassFrameThickness = new Thickness(0, 0, 0, 1),
             UseAeroCaptionButtons = false, CornerRadius = new CornerRadius(0),
         });
 
@@ -42,7 +42,7 @@ public sealed class SweepWindow : Window
         head.Children.Add(new TextBlock { Text = "Inbox sweep", FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
         head.Children.Add(_summary);
         head.Children.Add(_filters);
-        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(head, true);
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(_filters, true);   // the title row stays draggable
         Grid.SetRow(head, 0);
         root.Children.Add(head);
 
