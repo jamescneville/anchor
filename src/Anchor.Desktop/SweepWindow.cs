@@ -17,6 +17,7 @@ public sealed class SweepWindow : Window
     readonly WrapPanel _summary = new() { Margin = new Thickness(0, 10, 0, 0) };
     readonly WrapPanel _filters = new() { Margin = new Thickness(0, 12, 0, 0) };
     readonly TextBlock _footer = new() { FontSize = 12, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 12, 0, 0) };
+    Button? _run;
     string _category = "All";
     int _maxPriority = 5;
 
@@ -39,7 +40,16 @@ public sealed class SweepWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var head = new StackPanel { Margin = new Thickness(0, 4, 0, 14) };
-        head.Children.Add(new TextBlock { Text = "Inbox sweep", FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
+        var titleRow = new DockPanel();
+        var run = Ui.Primary("Run sweep"); run.Margin = new Thickness(0, 0, 130, 0); run.VerticalAlignment = VerticalAlignment.Center;
+        run.ToolTip = "Read the last 45 days of mail with Claude (about 3 to 8 minutes; uses some of your Claude usage) and rank every loose end";
+        run.Click += async (_, _) => { var m = await _engine.RunSweepAsync(); if (m.StartsWith("Sweep failed")) MessageBox.Show(this, m, "Inbox sweep"); };
+        _run = run;
+        DockPanel.SetDock(run, Dock.Right);
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(run, true);
+        titleRow.Children.Add(run);
+        titleRow.Children.Add(new TextBlock { Text = "Inbox sweep", FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
+        head.Children.Add(titleRow);
         head.Children.Add(_summary);
         head.Children.Add(_filters);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(_filters, true);   // the title row stays draggable
@@ -77,6 +87,7 @@ public sealed class SweepWindow : Window
     {
         var sweep = _engine.Sweep;
         var open = _engine.OpenSweepItems();
+        if (_run is not null) { _run.IsEnabled = !_engine.SweepRunning; _run.Content = _engine.SweepRunning ? "Sweeping…" : sweep is null ? "Run sweep" : "Run again"; }
         _summary.Children.Clear(); _filters.Children.Clear(); _list.Children.Clear();
 
         if (sweep is null)
@@ -88,12 +99,13 @@ public sealed class SweepWindow : Window
                 Children =
                 {
                     new TextBlock { Text = "No sweep yet", FontSize = 18, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center },
-                    new TextBlock { Text = "In Claude desktop, open Scheduled, find \"anchor-inbox-sweep\" and choose Run now. It reads your inbox in the background and this window fills in when it finishes. You only need to do it now and then.", Foreground = Ui.B("Dim"), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 8, 0, 0) },
+                    new TextBlock { Text = _engine.SweepStatus ?? "Press Run sweep. Claude reads the last 45 days of your mail in the background (no window opens) and this list fills in when it finishes. You only need to do it now and then.", Foreground = Ui.B("Dim"), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 8, 0, 0) },
                 },
             });
             return;
         }
 
+        if (_engine.SweepStatus is { } st) _summary.Children.Add(Ui.Chip(st, "accent"));
         _summary.Children.Add(Ui.Chip($"{sweep.Scanned} messages read", "neutral"));
         _summary.Children.Add(Ui.Chip($"{open.Count} still open", open.Count > 0 ? "warn" : "ok"));
         if (open.Count(i => i.Priority <= 2) is > 0 and var hot) _summary.Children.Add(Ui.Chip($"{hot} urgent or high", "alarm"));
@@ -132,8 +144,8 @@ public sealed class SweepWindow : Window
         }
 
         var q = _engine.Store.State.TrashQueue.Count;
-        _footer.Text = (q > 0 ? $"{q} message{(q == 1 ? "" : "s")} will move to Deleted Items on Claude's next sync (recoverable from Deleted Items). " : "")
-            + "Trash only ever moves mail to Deleted Items; nothing is permanently deleted. Re-run \"anchor-inbox-sweep\" from Claude desktop for a fresh scan.";
+        _footer.Text = (q > 0 ? $"{q} message{(q == 1 ? "" : "s")} will move to Deleted Items on Claude's next sync. " : "")
+            + "Trash only ever moves mail to Deleted Items (recoverable); nothing is permanently deleted.";
     }
 
     UIElement Row(SweepItem i)

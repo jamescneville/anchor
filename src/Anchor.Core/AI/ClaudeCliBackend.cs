@@ -79,7 +79,29 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
         finally { OneAtATime.Release(); }
     }
 
-    async Task<string> RunOnceAsync(string system, string user, string model, CancellationToken ct)
+    /// <summary>
+    /// Runs one headless turn WITH the user's Microsoft 365 connector, restricted to the listed tools (everything else is denied).
+    /// Used by the inbox sweep and for moving mail to Deleted Items. Needs the Claude login to have the connector connected.
+    /// </summary>
+    public async Task<string> RunWithConnectorAsync(string system, string user, string model, IEnumerable<string> connectorTools, TimeSpan timeout, CancellationToken ct)
+    {
+        var allowed = connectorTools.Select(t => "mcp__claude_ai_Microsoft_365__" + t).ToArray();
+        await OneAtATime.WaitAsync(ct);
+        try
+        {
+            Exception? last = null;
+            foreach (var delay in new[] { 0, 8 })
+            {
+                if (delay > 0) await Task.Delay(TimeSpan.FromSeconds(delay), ct);
+                try { return await RunOnceAsync(system, user, model, ct, allowed, timeout); }
+                catch (TransientCliException ex) { last = ex; }
+            }
+            throw last!;
+        }
+        finally { OneAtATime.Release(); }
+    }
+
+    async Task<string> RunOnceAsync(string system, string user, string model, CancellationToken ct, string[]? connectorTools = null, TimeSpan? limit = null)
     {
         var psi = new ProcessStartInfo(exePath)
         {
@@ -88,15 +110,19 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
             WorkingDirectory = Path.GetTempPath(), // no project files, CLAUDE.md or hooks to pick up
         };
-        foreach (var a in new[] { "-p", "--output-format", "json", "--model", model, "--tools", "", "--system-prompt", system,
-                                  "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--setting-sources", "" })
-            psi.ArgumentList.Add(a);
+        // Connector mode keeps ToolSearch (it loads the connector's tools) and allows only the named tools; plain mode has no tools at all.
+        string[] args = connectorTools is null
+            ? ["-p", "--output-format", "json", "--model", model, "--tools", "", "--system-prompt", system,
+               "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--setting-sources", ""]
+            : ["-p", "--output-format", "json", "--model", model, "--tools", "ToolSearch", "--system-prompt", system,
+               "--no-session-persistence", "--permission-mode", "dontAsk", "--allowedTools", string.Join(",", connectorTools)];
+        foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment.Remove("ANTHROPIC_API_KEY");   // must use the Claude login, never silently bill an API key
         psi.Environment.Remove("ANTHROPIC_AUTH_TOKEN");
 
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Could not start Claude.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromMinutes(3));
+        timeout.CancelAfter(limit ?? TimeSpan.FromMinutes(3));
         try
         {
             await proc.StandardInput.WriteAsync(user.AsMemory(), timeout.Token);
@@ -111,7 +137,7 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
         catch (OperationCanceledException)
         {
             try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-            throw ct.IsCancellationRequested ? new OperationCanceledException(ct) : new TimeoutException("Claude took longer than 3 minutes.");
+            throw ct.IsCancellationRequested ? new OperationCanceledException(ct) : new TimeoutException($"Claude took longer than {(limit ?? TimeSpan.FromMinutes(3)).TotalMinutes:0} minutes.");
         }
     }
 
