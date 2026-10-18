@@ -19,7 +19,7 @@ public sealed class SweepWindow : Window
     readonly TextBlock _footer = new() { FontSize = 12, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 12, 0, 0) };
     Button? _run;
     string _category = "All";
-    bool _showAside;
+    string _tab = "todo";      // todo | queue | cleared
     int _maxPriority = 5;
 
     public SweepWindow(AssistantEngine engine)
@@ -122,9 +122,13 @@ public sealed class SweepWindow : Window
             b.Click += (_, _) => { act(); Render(); };
             _filters.Children.Add(b);
         }
-        View($"To do ({open.Count})", !_showAside, () => _showAside = false);
-        View($"Set aside ({aside.Count})", _showAside, () => _showAside = true);
-        if (_showAside) { RenderAside(aside); return; }
+        var queued = aside.Where(x => x.Queued).ToList();
+        var cleared = aside.Where(x => !x.Queued).ToList();
+        View($"To do ({open.Count})", _tab == "todo", () => _tab = "todo");
+        View($"Sync queue ({queued.Count})", _tab == "queue", () => _tab = "queue");
+        View($"Cleared ({cleared.Count})", _tab == "cleared", () => _tab = "cleared");
+        if (_tab == "queue") { RenderQueue(queued); return; }
+        if (_tab == "cleared") { RenderAside(cleared); return; }
         _filters.Children.Add(new Border { Width = 1, Background = Ui.B("Line"), Margin = new Thickness(6, 6, 14, 6) });
 
         var cats = open.Select(i => i.Category).Distinct().OrderBy(c => c).ToList();
@@ -163,22 +167,57 @@ public sealed class SweepWindow : Window
             + "Trash only ever moves mail to Deleted Items (recoverable); nothing is permanently deleted.";
     }
 
+    void RenderQueue(IReadOnlyList<(SweepItem Item, string How, bool Queued)> queued)
+    {
+        var next = SyncSchedule.Next(DateTime.Now);
+        var when = next.Date == DateTime.Today ? Fmt.Time(next) : Fmt.DayTime(next);
+        var info = new TextBlock
+        {
+            Text = queued.Count == 0
+                ? "Nothing is waiting. Messages you Trash are listed here until Claude's next sync moves them to Deleted Items in Outlook."
+                : $"These {queued.Count} message{(queued.Count == 1 ? "" : "s")} will be moved to Deleted Items in Outlook at Claude's next sync, around {when}. Put back cancels one. To go sooner, open Claude desktop, then Scheduled, then \"Anchor: sync Outlook and Teams\" and choose Run now.",
+            FontSize = 12.5, Foreground = Ui.B("Dim"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 0, 0, 12),
+        };
+        _list.Children.Add(info);
+        foreach (var x in queued) _list.Children.Add(AsideRow(x.Item));
+        _footer.Text = "Moving mail needs an approved Claude run, so Anchor can't do it on its own. Nothing is permanently deleted.";
+    }
+
+    UIElement AsideRow(SweepItem item)
+    {
+        var back = Ui.Secondary("Put back"); back.Margin = new Thickness(12, 0, 0, 0); back.VerticalAlignment = VerticalAlignment.Center;
+        back.Click += (_, _) => _engine.RestoreSweepItem(item.Id);
+        var open = Ui.Ghost("Open"); open.Foreground = Ui.B("Accent"); open.VerticalAlignment = VerticalAlignment.Center;
+        var link = item.Link;
+        open.Click += (_, _) => { if (link is not null) Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); };
+        open.Visibility = link is null ? Visibility.Collapsed : Visibility.Visible;
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = item.Title, FontWeight = FontWeights.SemiBold, FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
+        text.Children.Add(new TextBlock { Text = $"{(item.From.Length > 0 ? item.From : "Unknown sender")} · {item.Category} · {PriorityName(item.Priority)}", FontSize = 12, Foreground = Ui.B("Dim"), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+        var tools = new StackPanel { Orientation = Orientation.Horizontal, Children = { open, back } };
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(tools, 1);
+        grid.Children.Add(text); grid.Children.Add(tools);
+        return new Border { Background = Ui.B("Card"), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 9, 10, 9), Margin = new Thickness(0, 0, 0, 6), Child = grid };
+    }
+
     void RenderAside(IReadOnlyList<(SweepItem Item, string How, bool Queued)> aside)
     {
         if (aside.Count == 0)
         {
-            _list.Children.Add(new TextBlock { Text = "Nothing set aside. Items you mark Handled, put on today's list or Trash show up here so you can put them back.", Foreground = Ui.B("Dim"), TextWrapping = TextWrapping.Wrap, MaxWidth = 460, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 40, 0, 0), HorizontalAlignment = HorizontalAlignment.Center });
+            _list.Children.Add(new TextBlock { Text = "Nothing cleared yet. Items you mark Handled, put on today's list or have already been moved to Deleted Items show up here so you can put them back in the list.", Foreground = Ui.B("Dim"), TextWrapping = TextWrapping.Wrap, MaxWidth = 460, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 40, 0, 0), HorizontalAlignment = HorizontalAlignment.Center });
             _footer.Text = "";
             return;
         }
         (string Key, string Title, string Hint, string Brush)[] groups =
         [
-            ("queued", "Queued to trash", "Moves to Deleted Items on Claude's next sync. Put back to cancel.", "Alarm"),
             ("sent", "Sent to Deleted Items", "Already moved in Outlook. Putting it back here only shows it in this list again; restore the mail itself from Deleted Items.", "Dim"),
             ("today", "On today's list", "Put back removes it from today's list.", "Accent"),
             ("handled", "Handled", "Hidden from your list.", "Dim"),
         ];
-        string Key((SweepItem Item, string How, bool Queued) x) => x.Queued ? "queued" : x.How == "trash" ? "sent" : x.How == "today" ? "today" : "handled";
+        string Key((SweepItem Item, string How, bool Queued) x) => x.How == "trash" ? "sent" : x.How == "today" ? "today" : "handled";
         foreach (var g in groups)
         {
             var rows = aside.Where(x => Key(x) == g.Key).ToList();
@@ -208,8 +247,7 @@ public sealed class SweepWindow : Window
                 _list.Children.Add(new Border { Background = Ui.B("Card"), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 9, 10, 9), Margin = new Thickness(0, 0, 0, 6), Child = grid });
             }
         }
-        var q = _engine.Store.State.TrashQueue.Count;
-        _footer.Text = q > 0 ? $"{q} message{(q == 1 ? "" : "s")} queued to move to Deleted Items on Claude's next sync." : "";
+        _footer.Text = "";
     }
 
     UIElement Row(SweepItem i)

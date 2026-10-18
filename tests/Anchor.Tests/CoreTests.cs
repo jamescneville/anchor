@@ -684,3 +684,18 @@ public class SweepTests
 
     [Fact] public void Garbage_is_ignored() => Assert.Null(Bridge.ParseSweep("not json", DateTimeOffset.Now));
 }
+
+public class SyncScheduleTests
+{
+    [Fact] public void Weekday_morning_rolls_to_the_next_hour() =>
+        Assert.Equal(new DateTime(2026, 10, 19, 10, 0, 0), SyncSchedule.Next(new DateTime(2026, 10, 19, 9, 20, 0)));      // Monday
+
+    [Fact] public void Weekday_evening_rolls_to_next_morning() =>
+        Assert.Equal(new DateTime(2026, 10, 20, 7, 0, 0), SyncSchedule.Next(new DateTime(2026, 10, 19, 18, 30, 0)));
+
+    [Fact] public void Saturday_uses_the_four_weekend_slots() =>
+        Assert.Equal(new DateTime(2026, 10, 17, 21, 0, 0), SyncSchedule.Next(new DateTime(2026, 10, 17, 17, 5, 0)));
+
+    [Fact] public void Late_Sunday_goes_to_Monday_seven() =>
+        Assert.Equal(new DateTime(2026, 10, 19, 7, 0, 0), SyncSchedule.Next(new DateTime(2026, 10, 18, 21, 30, 0)));
+}
