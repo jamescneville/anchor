@@ -93,12 +93,15 @@ public sealed class SettingsWindow : Window
         save.Click += (_, _) => SaveAndRestart();
         var raw = Ui.Secondary("Open JSON");
         raw.Click += (_, _) => Process.Start(new ProcessStartInfo(AppPaths.SettingsFile) { UseShellExecute = true });
+        var wiz = Ui.Secondary("Setup wizard");
+        wiz.ToolTip = "Walk through connecting accounts and setting up the Outlook/Teams sync";
+        wiz.Click += (_, _) => { new WizardWindow(AnchorSettings.Load()).Show(); Close(); };
         var cancel = Ui.Secondary("Cancel");
         cancel.Click += (_, _) => Close();
         var hint = Ui.Dim("Anchor restarts to apply connector changes.");
         hint.VerticalAlignment = VerticalAlignment.Center;
         var footer = new DockPanel { Margin = new Thickness(26, 12, 26, 16) };
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Children = { raw, cancel, save } };
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Children = { wiz, raw, cancel, save } };
         save.Margin = new Thickness(0);
         DockPanel.SetDock(right, Dock.Right);
         footer.Children.Add(right);

@@ -107,6 +107,10 @@ public sealed class AnchorSettings
     public bool SpeakAlerts { get; set; } = true;
     /// <summary>false = 2:30 PM, true = 14:30.</summary>
     public bool Use24HourClock { get; set; }
+    /// <summary>True once the first-run wizard has been finished or dismissed.</summary>
+    public bool SetupDone { get; set; }
+    /// <summary>The user's own work address, so Claude's mail sweep can ignore sent mail.</summary>
+    public string WorkEmail { get; set; } = "";
     /// <summary>Extra early alert (minutes) for in-person meetings with a physical location, to leave time to travel.</summary>
     public int InPersonLeadMinutes { get; set; } = 30;
     /// <summary>Morning plan at workday start and a wrap-up sweep 30 min before it ends (weekdays).</summary>

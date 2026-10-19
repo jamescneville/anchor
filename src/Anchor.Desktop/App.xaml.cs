@@ -73,8 +73,19 @@ public partial class App : Application
         if (e.Args.Contains("--brief")) new BriefWindow(_engine, "morning").Show();
         if (e.Args.Contains("--sweep")) new SweepWindow(_engine).Show();
         if (e.Args.Contains("--settings")) new SettingsWindow(_engine).Show();
-        if (settings.Google is { Enabled: false } && settings.Microsoft is { Enabled: false } && settings.IcsFeeds.Count == 0)
-            new SettingsWindow(_engine).Show(); // first run: nothing connected yet
+        if (e.Args.Contains("--wizard")) new WizardWindow(AnchorSettings.Load()).Show();
+        if (e.Args.Contains("--connect-google") && _engine.IsConnected("Google") is false && _engine.Providers.Contains("Google"))
+            _ = Task.Run(async () =>
+            {
+                try { await _engine.ConnectAsync("Google", CancellationToken.None); await _engine.RefreshAllAsync(true); }
+                catch (Exception ex) { _engine.SourceErrors["Google"] = ex.Message; }
+            });
+        if (!settings.SetupDone)
+        {
+            var configured = settings.Google.Enabled || settings.Microsoft.Enabled || settings.IcsFeeds.Count > 0;
+            if (configured) { settings.SetupDone = true; try { settings.Save(); } catch { /* retry next launch */ } }   // someone who set things up by hand doesn't need the wizard
+            else new WizardWindow(settings).Show();
+        }
     }
 
     void RegisterHotkey()
@@ -118,6 +129,7 @@ public partial class App : Application
         menu.Items.Add("Open Anchor", null, (_, _) => ShowMain());
         menu.Items.Add("Where was I?", null, (_, _) => new RecoveryWindow(_engine!, false).Show());
         menu.Items.Add("Settings…", null, (_, _) => new SettingsWindow(_engine!).Show());
+        menu.Items.Add("Setup wizard…", null, (_, _) => new WizardWindow(AnchorSettings.Load()).Show());
         menu.Items.Add("Test alert (meeting in 1 min)", null, (_, _) => _engine!.AddTestMeeting(1));
         var startup = new System.Windows.Forms.ToolStripMenuItem("Start with Windows") { Checked = IsAutoStart(), CheckOnClick = true };
         startup.CheckedChanged += (_, _) => SetAutoStart(startup.Checked);
@@ -136,9 +148,9 @@ public partial class App : Application
 
     void ShowMain() { _main!.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); }
 
-    static bool IsAutoStart() => Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue("Anchor") is not null;
+    internal static bool IsAutoStart() => Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue("Anchor") is not null;
 
-    static void SetAutoStart(bool on)
+    internal static void SetAutoStart(bool on)
     {
         using var k = Registry.CurrentUser.OpenSubKey(RunKey, writable: true)!;
         if (on) k.SetValue("Anchor", $"\"{Environment.ProcessPath}\" --background");

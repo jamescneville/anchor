@@ -98,6 +98,8 @@ The on-demand Claude task `anchor-inbox-sweep` (Sonnet) reads the last 45 days o
 
 ## Installing
 
+New here? Start with [docs/SETUP.md](docs/SETUP.md): install, the first-run wizard, and how to connect Google and the Outlook/Teams sync.
+
 `scriptsuild-installer.ps1` publishes the app and builds `dist\Anchor-Setup-<version>.exe` with [Inno Setup 6](https://jrsoftware.org/isdl.php) (`winget install JRSoftware.InnoSetup`). The installer puts Anchor in `C:\Program Files\Anchor`, adds a Start menu entry, optionally starts it at sign-in and a desktop shortcut, and registers an uninstaller in Settings, Apps. Uninstall closes Anchor, removes the files and the autostart entry, and asks whether to also delete your settings and tokens in `%LOCALAPPDATA%\Anchor` (default: keep). Nothing else is needed on the target PC (the exe is self-contained).
 
 After installing, open Settings in Anchor to connect Google and set up the Claude connection. The Claude-based features (inbox sweep, Outlook and Teams sync) additionally need Claude desktop with the Microsoft 365 connector and the scheduled tasks `anchor-outlook-sync`, `anchor-outlook-sync-weekend` and `anchor-inbox-sweep`, which live in your own Claude account, not in the installer.
