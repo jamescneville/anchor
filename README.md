@@ -95,3 +95,9 @@ tests/Anchor.Tests   scheduler (sleep/wake, snooze, reschedule), ICS recurrence,
 ## Inbox sweep and today's list
 
 The on-demand Claude task `anchor-inbox-sweep` (Sonnet) reads the last 45 days of the Outlook inbox, drops anything already replied to, ranks the loose ends and writes `bridge\sweep.json`. The envelope icon in Anchor opens the sweep window: Open in Outlook, **+ Today** (adds to the to-do list on the main window), Handled, or **Trash**, which queues the message id in `bridge\sweep-actions.json`; Claude moves it to Deleted Items (recoverable) on its next run. Anchor itself has no mailbox access.
+
+## Installing
+
+`scriptsuild-installer.ps1` publishes the app and builds `dist\Anchor-Setup-<version>.exe` with [Inno Setup 6](https://jrsoftware.org/isdl.php) (`winget install JRSoftware.InnoSetup`). The installer puts Anchor in `C:\Program Files\Anchor`, adds a Start menu entry, optionally starts it at sign-in and a desktop shortcut, and registers an uninstaller in Settings, Apps. Uninstall closes Anchor, removes the files and the autostart entry, and asks whether to also delete your settings and tokens in `%LOCALAPPDATA%\Anchor` (default: keep). Nothing else is needed on the target PC (the exe is self-contained).
+
+After installing, open Settings in Anchor to connect Google and set up the Claude connection. The Claude-based features (inbox sweep, Outlook and Teams sync) additionally need Claude desktop with the Microsoft 365 connector and the scheduled tasks `anchor-outlook-sync`, `anchor-outlook-sync-weekend` and `anchor-inbox-sweep`, which live in your own Claude account, not in the installer.
