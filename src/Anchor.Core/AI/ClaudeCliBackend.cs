@@ -129,11 +129,11 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
             WorkingDirectory = Path.GetTempPath(), // no project files, CLAUDE.md or hooks to pick up
         };
-        // Connector mode keeps ToolSearch (it loads the connector's tools) and allows only the named tools; plain mode has no tools at all.
+        // Connector mode must not restrict --tools (the connector's tools are loaded on demand and a restricted set made newer CLIs print tool calls as text); dontAsk denies everything except the named tools. Plain mode has no tools at all.
         string[] args = connectorTools is null
             ? ["-p", "--output-format", "json", "--model", model, "--tools", "", "--system-prompt", system,
                "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--setting-sources", ""]
-            : ["-p", "--output-format", "json", "--model", model, "--tools", "ToolSearch", "--system-prompt", system,
+            : ["-p", "--output-format", "json", "--model", model, "--system-prompt", system,
                "--no-session-persistence", "--permission-mode", "dontAsk", "--allowedTools", string.Join(",", connectorTools)];
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment.Remove("ANTHROPIC_API_KEY");   // must use the Claude login, never silently bill an API key
