@@ -72,6 +72,8 @@ public partial class App : Application
         if (e.Args.Contains("--recovery")) new RecoveryWindow(_engine, false).Show();
         if (e.Args.Contains("--brief")) new BriefWindow(_engine, "morning").Show();
         if (e.Args.Contains("--sweep")) new SweepWindow(_engine).Show();
+        if (e.Args.Contains("--sweep-test"))   // dev: run a quick sweep headless, write the outcome to sweep-test.txt
+            _ = Task.Run(async () => File.WriteAllText(Path.Combine(AppPaths.Dir, "sweep-test.txt"), await _engine.RunSweepAsync(quick: true)));
         if (e.Args.Contains("--settings")) new SettingsWindow(_engine).Show();
         if (e.Args.Contains("--wizard")) new WizardWindow(AnchorSettings.Load()).Show();
         if (e.Args.Contains("--connect-google") && _engine.IsConnected("Google") is false && _engine.Providers.Contains("Google"))
