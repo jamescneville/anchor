@@ -28,7 +28,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\anchor.ico</ApplicationIcon>
     <AssemblyName>Anchor</AssemblyName>
-    <Version>1.1.2</Version>
+    <Version>1.2.0</Version>
     <Product>Anchor</Product>
     <Company>James Neville</Company>
     <Description>Anchor keeps you oriented: meeting alerts, a merged agenda, inbox triage and day planning.</Description>
