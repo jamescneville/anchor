@@ -30,6 +30,11 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
         if (Directory.Exists(pkgs))
             foreach (var pkg in Directory.GetDirectories(pkgs, "Claude_*"))
                 roots.Add(Path.Combine(pkg, "LocalCache", "Roaming", "Claude", "claude-code"));
+        // Claude desktop 4.29 and later keep it under %LOCALAPPDATA%\Claude-Data\claude_<package>\claude-code.
+        var data = Path.Combine(local, "Claude-Data");
+        if (Directory.Exists(data))
+            foreach (var d in Directory.GetDirectories(data, "claude_*"))
+                roots.Insert(0, Path.Combine(d, "claude-code"));
         roots.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Claude", "claude-code"));
 
         // Layout: claude-code/<version>/<hash>/claude.exe (also accept claude-code/<version>/claude.exe).
@@ -39,6 +44,20 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
             .Where(x => File.Exists(x.Exe))
             .OrderByDescending(x => x.Ver).FirstOrDefault();
         if (best.Exe is not null) return best.Exe;
+
+        // Newer Claude desktop builds no longer keep their own copy. Fall back to a standalone Claude Code install (the default
+        // location of the native installer), then the copy bundled with the VS Code extension.
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var standalone = Path.Combine(home, ".local", "bin", "claude.exe");
+        if (File.Exists(standalone)) return standalone;
+        var ext = Path.Combine(home, ".vscode", "extensions");
+        if (Directory.Exists(ext))
+        {
+            var bundled = Directory.GetDirectories(ext, "anthropic.claude-code-*")
+                .Select(d => (Ver: ParseVersion(Path.GetFileName(d).Split('-')[2]), Exe: Path.Combine(d, "resources", "native-binary", "claude.exe")))
+                .Where(x => File.Exists(x.Exe)).OrderByDescending(x => x.Ver).FirstOrDefault();
+            if (bundled.Exe is not null) return bundled.Exe;
+        }
 
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
         {

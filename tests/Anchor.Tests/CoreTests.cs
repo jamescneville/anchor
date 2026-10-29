@@ -486,7 +486,8 @@ public class FocusTests
         var store = new StateStore(Path.Combine(Path.GetTempPath(), $"anchor-test-{Guid.NewGuid():N}.json"));
         return (new FocusTracker(store), store);
     }
-    static readonly DateTimeOffset Now = new(2026, 10, 19, 14, 0, 0, TimeSpan.FromHours(-4));
+    // Relative to today: Finish() prunes old entries against the real clock, so a fixed date would rot.
+    static readonly DateTimeOffset Now = new DateTimeOffset(DateTime.Today.AddHours(10));
 
     [Fact]
     public void Finishing_logs_and_clears_the_task()

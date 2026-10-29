@@ -17,7 +17,7 @@ public sealed class SweepWindow : Window
     readonly WrapPanel _summary = new() { Margin = new Thickness(0, 10, 0, 0) };
     readonly WrapPanel _filters = new() { Margin = new Thickness(0, 12, 0, 0) };
     readonly TextBlock _footer = new() { FontSize = 12, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 12, 0, 0) };
-    Button? _run;
+    Button? _run, _full;
     string _category = "All";
     string _tab = "todo";      // todo | queue | cleared
     int _maxPriority = 5;
@@ -42,13 +42,19 @@ public sealed class SweepWindow : Window
 
         var head = new StackPanel { Margin = new Thickness(0, 4, 0, 14) };
         var titleRow = new DockPanel();
-        var run = Ui.Primary("Run sweep"); run.Margin = new Thickness(0, 0, 130, 0); run.VerticalAlignment = VerticalAlignment.Center;
-        run.ToolTip = "Read the last 45 days of mail with Claude (about 3 to 8 minutes; uses some of your Claude usage) and rank every loose end";
-        run.Click += async (_, _) => { var m = await _engine.RunSweepAsync(); if (m.StartsWith("Sweep failed")) MessageBox.Show(this, m, "Inbox sweep"); };
-        _run = run;
-        DockPanel.SetDock(run, Dock.Right);
-        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(run, true);
-        titleRow.Children.Add(run);
+        async void Go(bool quick) { var m = await _engine.RunSweepAsync(quick); if (m.StartsWith("Sweep failed")) MessageBox.Show(this, m, "Inbox sweep"); }
+        var run = Ui.Primary("Quick sweep"); run.Margin = new Thickness(0, 0, 130, 0); run.VerticalAlignment = VerticalAlignment.Center;
+        run.ToolTip = "Only mail since the last sweep (usually 1 to 3 minutes). Earlier findings are kept.";
+        run.Click += (_, _) => Go(true);
+        var full = Ui.Secondary("Full sweep"); full.Margin = new Thickness(0, 0, 10, 0); full.VerticalAlignment = VerticalAlignment.Center;
+        full.ToolTip = "Re-read the last 45 days of mail and rebuild the list (usually 3 to 8 minutes; uses more of your Claude usage)";
+        full.Click += (_, _) => Go(false);
+        _run = run; _full = full;
+        var runs = new StackPanel { Orientation = Orientation.Horizontal, Children = { full, run } };
+        runs.Margin = new Thickness(0, 0, 130, 0); run.Margin = new Thickness(0);
+        DockPanel.SetDock(runs, Dock.Right);
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(runs, true);
+        titleRow.Children.Add(runs);
         titleRow.Children.Add(new TextBlock { Text = "Inbox sweep", FontSize = 26, FontWeight = FontWeights.SemiBold, FontFamily = (FontFamily)Application.Current.Resources["DisplayFont"] });
         head.Children.Add(titleRow);
         head.Children.Add(_summary);
@@ -88,7 +94,12 @@ public sealed class SweepWindow : Window
     {
         var sweep = _engine.Sweep;
         var open = _engine.OpenSweepItems();
-        if (_run is not null) { _run.IsEnabled = !_engine.SweepRunning; _run.Content = _engine.SweepRunning ? "Sweeping…" : sweep is null ? "Run sweep" : "Run again"; }
+        if (_run is not null && _full is not null)
+        {
+            _run.IsEnabled = _full.IsEnabled = !_engine.SweepRunning;
+            _run.Content = _engine.SweepRunning ? "Sweeping…" : sweep is null ? "Run sweep" : "Quick sweep";
+            _full.Visibility = sweep is null ? Visibility.Collapsed : Visibility.Visible;     // the first sweep is always a full one
+        }
         _summary.Children.Clear(); _filters.Children.Clear(); _list.Children.Clear();
 
         if (sweep is null)
@@ -100,7 +111,7 @@ public sealed class SweepWindow : Window
                 Children =
                 {
                     new TextBlock { Text = "No sweep yet", FontSize = 18, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center },
-                    new TextBlock { Text = _engine.SweepStatus ?? "Press Run sweep. Claude reads the last 45 days of your mail in the background (no window opens) and this list fills in when it finishes. You only need to do it now and then.", Foreground = Ui.B("Dim"), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 8, 0, 0) },
+                    new TextBlock { Text = _engine.SweepStatus ?? "Press Run sweep. Claude reads the last 45 days (a few minutes, once) of your mail in the background (no window opens) and this list fills in when it finishes. You only need to do it now and then.", Foreground = Ui.B("Dim"), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 8, 0, 0) },
                 },
             });
             return;
