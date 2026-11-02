@@ -52,6 +52,10 @@ Work content is kept away from AI by default: work meetings and mail are redacte
 - **Inbox sweep:** the envelope icon opens the sweep window. **Run sweep** reads the last 45 days of mail in the background and ranks every loose end. Open a message, add it to today's list, mark it handled, or Trash it. **Sync queue** shows Trash clicks waiting for the next sync, with **Put back** to cancel; **Cleared** lists what you've dealt with.
 - **Today's list:** on the main window; type your own items or add them from the sweep.
 
+### Natural voice for alerts (optional)
+
+Anchor speaks alerts with the voices installed in Windows, which sound robotic. For a much more natural, fully offline voice, run `scripts\install-natural-voice.ps1` (from the project folder). It downloads about 86 MB: the Piper program (MIT licence, from GitHub) and one English voice (from Hugging Face), checks them, and puts them in `%LOCALAPPDATA%\Anchoroices`. Then choose **Natural (Piper)** under Settings, Voice, and press **Hear it**. If it ever fails, Anchor falls back to the Windows voice. Delete the `voices` folder to remove it.
+
 ## 4. Troubleshooting
 
 - **Google says "client missing a project id" or "invalid_client":** the client ID or secret was pasted wrongly. Re-check them in Settings.

@@ -211,7 +211,7 @@ public sealed class SettingsWindow : Window
         var pPanel = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var b in pBtns) pPanel.Children.Add(b);
         Border Box(StackPanel p) => new() { Background = Ui.B("Field"), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), Child = p };
 
-        _section.Children.Add(Row("Voice", voices.Count == 0 ? "No Windows voices found." : "The voices installed in Windows.", Box(vPanel)));
+        _section.Children.Add(Row("Voice", voices.Count == 0 ? "No Windows voices found." : Voice.NaturalAvailable ? "Natural is an offline neural voice; the others are Windows voices." : "Windows voices. For a more natural one, see the setup guide (Natural voice).", Box(vPanel)));
         var test = Ui.Secondary("Hear it");
         test.Click += (_, _) => { var v = voice; var r = rate; _ = Task.Run(() => Voice.Say(SpeechText.Phrase("Weekly planning", DateTimeOffset.Now.AddMinutes(5), DateTimeOffset.Now), v, r)); };
         var paceRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { Box(pPanel), new Border { Width = 10 }, test } };
