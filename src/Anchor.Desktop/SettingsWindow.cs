@@ -37,6 +37,7 @@ public sealed class SettingsWindow : Window
         Field("“Where was I?” hotkey", "e.g. Ctrl+Space, Ctrl+Shift+W, Win+Shift+A", _s.Hotkey, v => _s.Hotkey = v.Trim(), 200);
         Toggle("24-hour clock", "Off shows times like 2:30 PM.", _s.Use24HourClock, v => _s.Use24HourClock = v);
         Toggle("Speak alerts aloud", null, _s.SpeakAlerts, v => _s.SpeakAlerts = v);
+        VoiceRows();
         Toggle("Morning plan and end-of-day wrap-up", "A short brief at workday start, and a wrap-up 30 minutes before it ends.", _s.BriefsEnabled, v => _s.BriefsEnabled = v);
 
         Section("Claude", _engine.HasAnthropicKey ? "A key is saved. Leave the box empty to keep it." : "Add an API key to turn on AI triage and day plans.");
@@ -184,6 +185,38 @@ public sealed class SettingsWindow : Window
         var box = new PasswordBox { Password = value, Width = 300 };
         _section.Children.Add(Row(label, hint, box));
         _apply.Add(() => set(box.Password));
+    }
+
+    void VoiceRows()
+    {
+        var voices = Voice.Installed();
+        string Short(string full) => full.Replace("Microsoft ", "").Replace(" Desktop", "");
+        var options = new[] { "Default" }.Concat(voices.Select(Short)).ToArray();
+        var current = voices.FirstOrDefault(v => v == _s.SpeechVoice) is { } cv ? Short(cv) : "Default";
+        string voice = _s.SpeechVoice; int rate = _s.SpeechRate;
+
+        RadioButton[] Make(string[] names, Func<string, bool> on, Action<string> pick, string group)
+            => names.Select(n =>
+            {
+                var rb = new RadioButton { Content = n, GroupName = group, IsChecked = on(n), Style = (Style)Application.Current.Resources["Segment"] };
+                rb.Checked += (_, _) => pick(n);
+                return rb;
+            }).ToArray();
+
+        var vg = Guid.NewGuid().ToString("N"); var rg = Guid.NewGuid().ToString("N");
+        var vBtns = Make(options, n => n == current, n => voice = n == "Default" ? "" : voices.First(v => Short(v) == n), vg);
+        var vPanel = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var b in vBtns) vPanel.Children.Add(b);
+        string[] paces = ["Slower", "Normal", "Faster"];
+        var pBtns = Make(paces, n => n == (rate < 0 ? "Slower" : rate > 0 ? "Faster" : "Normal"), n => rate = n == "Slower" ? -2 : n == "Faster" ? 2 : 0, rg);
+        var pPanel = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var b in pBtns) pPanel.Children.Add(b);
+        Border Box(StackPanel p) => new() { Background = Ui.B("Field"), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), Child = p };
+
+        _section.Children.Add(Row("Voice", voices.Count == 0 ? "No Windows voices found." : "The voices installed in Windows.", Box(vPanel)));
+        var test = Ui.Secondary("Hear it");
+        test.Click += (_, _) => { var v = voice; var r = rate; _ = Task.Run(() => Voice.Say(SpeechText.Phrase("Weekly planning", DateTimeOffset.Now.AddMinutes(5), DateTimeOffset.Now), v, r)); };
+        var paceRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { Box(pPanel), new Border { Width = 10 }, test } };
+        _section.Children.Add(Row("Pace", null, paceRow));
+        _apply.Add(() => { _s.SpeechVoice = voice; _s.SpeechRate = rate; });
     }
 
     void CliRow()

@@ -38,6 +38,9 @@ public sealed class AnchorState
     /// <summary>How each handled sweep item was set aside: handled | today | trash.</summary>
     public Dictionary<string, string> SweepHow { get; set; } = new();
     public List<TodoItem> Todos { get; set; } = new();
+    /// <summary>Main-window layout the user dragged to: agenda share of the agenda+to-do width (0..1) and the plan card height in pixels.</summary>
+    public double? AgendaRatio { get; set; }
+    public double? PlanHeight { get; set; }
     public List<KnownCalendar> KnownCalendars { get; set; } = new();
     public DateTimeOffset? BridgeEventsAt { get; set; }
 

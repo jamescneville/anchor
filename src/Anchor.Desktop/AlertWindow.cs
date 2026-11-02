@@ -133,12 +133,9 @@ public sealed class AlertWindow : Window
     void Speak()
     {
         if (!_engine.Settings.SpeakAlerts) return;
-        var text = $"{_alert.Event.Title} {AlertScheduler.Describe(_alert.Event, DateTimeOffset.Now)}";
-        _ = Task.Run(() =>
-        {
-            try { using var s = new System.Speech.Synthesis.SpeechSynthesizer(); s.Speak(text); }
-            catch { /* no voice installed: sound + visual still fire */ }
-        });
+        var text = SpeechText.Phrase(_alert.Event.Title, _alert.Event.Start, DateTimeOffset.Now);
+        var voice = _engine.Settings.SpeechVoice; var rate = _engine.Settings.SpeechRate;
+        _ = Task.Run(() => Voice.Say(text, voice, rate));
     }
 
     void Repeat()

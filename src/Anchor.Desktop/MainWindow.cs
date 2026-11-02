@@ -46,8 +46,10 @@ public sealed class MainWindow : Window
         var root = new Grid { Margin = new Thickness(26, 0, 26, 20) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 200 });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                         // splitter
+        var planRow = new RowDefinition { Height = new GridLength(Math.Clamp(_engine.Store.State.PlanHeight ?? 150, 90, 420)), MinHeight = 90, MaxHeight = 420 };
+        root.RowDefinitions.Add(planRow);
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         // Header: title + source chips on the left, actions on the right
@@ -88,10 +90,21 @@ public sealed class MainWindow : Window
         root.Children.Add(heroCard);
 
         // Agenda + attention
-        var cols = new Grid { Margin = new Thickness(0, 14, 0, 14) };
-        cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var cols = new Grid { Margin = new Thickness(0, 14, 0, 0) };
+        var ratio = Math.Clamp(_engine.Store.State.AgendaRatio ?? (1 / 2.25), 0.25, 0.75);        // default: agenda 1 part, to-do 1.25 parts
+        var agendaCol = new ColumnDefinition { Width = new GridLength(ratio, GridUnitType.Star), MinWidth = 300 };
+        var todoCol = new ColumnDefinition { Width = new GridLength(1 - ratio, GridUnitType.Star), MinWidth = 300 };
+        cols.ColumnDefinitions.Add(agendaCol);
         cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        cols.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+        cols.ColumnDefinitions.Add(todoCol);
+        var vSplit = new GridSplitter { Width = 14, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, Background = Brushes.Transparent, ResizeBehavior = GridResizeBehavior.PreviousAndNext, ResizeDirection = GridResizeDirection.Columns, Cursor = System.Windows.Input.Cursors.SizeWE, ToolTip = "Drag to resize" };
+        vSplit.DragCompleted += (_, _) =>
+        {
+            var a = agendaCol.ActualWidth; var t = todoCol.ActualWidth;
+            if (a + t > 0) _engine.Store.Mutate(s => s.AgendaRatio = a / (a + t));
+        };
+        Grid.SetColumn(vSplit, 1);
+        cols.Children.Add(vSplit);
         _cols = cols;
         var agendaHead = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
         var agendaLabel = Ui.Label("Agenda"); agendaLabel.Margin = new Thickness(0); agendaLabel.VerticalAlignment = VerticalAlignment.Center;
@@ -110,6 +123,11 @@ public sealed class MainWindow : Window
         Grid.SetRow(cols, 2);
         root.Children.Add(cols);
 
+        var hSplit = new GridSplitter { Height = 14, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent, ResizeBehavior = GridResizeBehavior.PreviousAndNext, ResizeDirection = GridResizeDirection.Rows, Cursor = System.Windows.Input.Cursors.SizeNS, ToolTip = "Drag to resize" };
+        hSplit.DragCompleted += (_, _) => _engine.Store.Mutate(s => s.PlanHeight = planRow.ActualHeight);
+        Grid.SetRow(hSplit, 3);
+        root.Children.Add(hSplit);
+
         // Plan
         _planBtn.Margin = new Thickness(0);
         _planBtn.Click += async (_, _) =>
@@ -124,12 +142,13 @@ public sealed class MainWindow : Window
         DockPanel.SetDock(_planBtn, Dock.Right);
         planHead.Children.Add(_planBtn);
         planHead.Children.Add(planLabel);
-        var planBody = new ScrollViewer { MaxHeight = 96, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
-        var planCard = Ui.Card(new StackPanel { Children = { planHead, planBody, _planWhen } });
-        Grid.SetRow(planCard, 3);
+        var planBody = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _plan };
+        DockPanel.SetDock(planHead, Dock.Top); DockPanel.SetDock(_planWhen, Dock.Bottom);
+        var planCard = Ui.Card(new DockPanel { Children = { planHead, _planWhen, planBody } });
+        Grid.SetRow(planCard, 4);
         root.Children.Add(planCard);
 
-        Grid.SetRow(_problems, 4);
+        Grid.SetRow(_problems, 5);
         root.Children.Add(_problems);
         Content = new Grid { Children = { root, Ui.CaptionButtons(this) } };
         StateChanged += (_, _) => root.Margin = WindowState == WindowState.Maximized
@@ -511,8 +530,8 @@ public sealed class MainWindow : Window
             _tasks.Children.Add(new Border { Background = Ui.B("CardRaised"), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 6), Child = g });
         }
 
-        var add = new TextBox { Height = 36, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 12), ToolTip = "Type something to do today and press Enter" };
-        var hint = new TextBlock { Text = "+ Add to today's list", Foreground = Ui.B("Dim"), IsHitTestVisible = false, Margin = new Thickness(13, 9, 0, 0), FontSize = 13 };
+        var add = new TextBox { MinHeight = 40, FontSize = 13.5, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 12), ToolTip = "Type something to do today and press Enter" };
+        var hint = new TextBlock { Text = "+ Add to today's list", Foreground = Ui.B("Dim"), IsHitTestVisible = false, Margin = new Thickness(13, 11, 0, 0), FontSize = 13.5 };
         add.TextChanged += (_, _) => hint.Visibility = add.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         add.KeyDown += (_, e) =>
         {

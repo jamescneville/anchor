@@ -105,6 +105,10 @@ public sealed class AnchorSettings
     public int SnoozeMinutes { get; set; } = 2;
     public int CheckInMinutes { get; set; } = 30;
     public bool SpeakAlerts { get; set; } = true;
+    /// <summary>Installed voice name, e.g. "Microsoft Zira Desktop". Empty = Windows default.</summary>
+    public string SpeechVoice { get; set; } = "";
+    /// <summary>-10 (slow) to 10 (fast); 0 is normal.</summary>
+    public int SpeechRate { get; set; }
     /// <summary>false = 2:30 PM, true = 14:30.</summary>
     public bool Use24HourClock { get; set; }
     /// <summary>True once the first-run wizard has been finished or dismissed.</summary>

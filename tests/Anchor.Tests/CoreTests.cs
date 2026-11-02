@@ -700,3 +700,28 @@ public class SyncScheduleTests
     [Fact] public void Late_Sunday_goes_to_Monday_seven() =>
         Assert.Equal(new DateTime(2026, 10, 19, 7, 0, 0), SyncSchedule.Next(new DateTime(2026, 10, 18, 21, 30, 0)));
 }
+
+public class SpeechTextTests
+{
+    static readonly DateTimeOffset T = new(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
+
+    [Fact] public void Reads_minutes_in_words_not_min() =>
+        Assert.Equal("Weekly planning starts in 5 minutes.", SpeechText.Phrase("Weekly planning", T.AddMinutes(5), T));
+
+    [Fact] public void Now_and_just_started()
+    {
+        Assert.Equal("Standup is starting now.", SpeechText.Phrase("Standup", T, T));
+        Assert.Equal("Standup started one minute ago.", SpeechText.Phrase("Standup", T, T.AddSeconds(75)));
+    }
+
+    [Fact] public void Cleans_tags_symbols_and_shortens_long_titles()
+    {
+        Assert.Equal("Vibe Coding Office Hours", SpeechText.Clean("[TechAdv] Vibe Coding Office Hours"));
+        Assert.Equal("one on one with Sam", SpeechText.Clean("1:1 w/ Sam"));
+        Assert.Equal("Tech Adv EMEA All Hands", SpeechText.Clean("Tech Adv EMEA All Hands - October 2026 monthly company wide session"));
+        Assert.Equal("your meeting", SpeechText.Clean("[Hold]"));
+    }
+
+    [Fact] public void Hours_are_spoken_for_far_off_events() =>
+        Assert.Equal("Heads up. Review starts in 3 hours and 30 minutes.", SpeechText.Phrase("Review", T.AddHours(3.5), T));
+}
