@@ -39,6 +39,11 @@ public sealed class AssistantEngine : IDisposable
     public Dictionary<string, string> SourceErrors { get; } = new();
 
     public event Action<DueAlert>? AlertDue;
+    /// <summary>Raised when the user has joined an event (clicked Join, or a meeting window for it is open). Its remaining alerts are cancelled.</summary>
+    public event Action<CalendarEvent>? Joined;
+    /// <summary>Set by the UI: true when a conferencing window for this event is open on this PC.</summary>
+    public Func<CalendarEvent, bool>? InMeetingProbe { get; set; }
+    readonly HashSet<string> _joined = new();
     public event Action? Changed;
     public event Action? CheckInDue;
     /// <summary>"morning" or "evening".</summary>
@@ -372,8 +377,32 @@ public sealed class AssistantEngine : IDisposable
         _ = RefreshAllAsync(forceMessages: true);
     }
 
+    /// <summary>Cancels every remaining alert for the event (the user is already in it) and closes its alert window.</summary>
+    public void MarkJoined(CalendarEvent e)
+    {
+        var key = EventKey(e);
+        _joined.Add(key);
+        Store.Mutate(s =>
+        {
+            for (var m = 0; m <= 120; m++) s.FiredAlerts.Add(AlertScheduler.Key(e, m));    // every offset, including the in-person lead
+            s.SnoozedUntil.Remove(key);
+        });
+        _activeAlerts.Remove(key);
+        Joined?.Invoke(e);
+    }
+
+    public bool IsJoined(CalendarEvent e) => _joined.Contains(EventKey(e));
+
     public void Tick(DateTimeOffset now)
     {
+        // Already in the meeting without using Anchor's Join button? Then stop reminding about it.
+        if (InMeetingProbe is { } probe)
+            foreach (var e in ActiveEvents.Where(x => !x.Cancelled && !x.IsAllDay && now >= x.Start.AddMinutes(-2) && now < x.End && !_joined.Contains(EventKey(x))).ToList())
+            {
+                bool inCall; try { inCall = probe(e); } catch { inCall = false; }
+                if (inCall) MarkJoined(e);
+            }
+
         var fired = Store.State.FiredAlerts;
         var due = EvaluateAlerts(now, fired);
         foreach (var d in due)

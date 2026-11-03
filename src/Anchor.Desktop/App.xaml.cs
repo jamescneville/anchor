@@ -46,6 +46,7 @@ public partial class App : Application
         var settings = AnchorSettings.Load();
         Fmt.Use24Hour = settings.Use24HourClock;
         _engine = new AssistantEngine(settings, new StateStore());
+        _engine.InMeetingProbe = MeetingPresence.InMeeting;
         _main = new MainWindow(_engine);
 
         _engine.AlertDue += a => Dispatcher.BeginInvoke(() => new AlertWindow(_engine, a).Show());

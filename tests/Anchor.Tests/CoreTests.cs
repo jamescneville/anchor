@@ -725,3 +725,17 @@ public class SpeechTextTests
     [Fact] public void Hours_are_spoken_for_far_off_events() =>
         Assert.Equal("Heads up. Review starts in 3 hours and 30 minutes.", SpeechText.Phrase("Review", T.AddHours(3.5), T));
 }
+
+public class JoinedAlertTests
+{
+    [Fact]
+    public void Marking_every_offset_fired_silences_the_rest_of_the_meeting()
+    {
+        var now = new DateTimeOffset(2026, 11, 3, 10, 0, 0, TimeSpan.Zero);
+        var e = new CalendarEvent("1", "Test", "Weekly sync", now.AddMinutes(3), now.AddMinutes(33), null, null, false, false, null, null);
+        var fired = new HashSet<string>();
+        for (var m = 0; m <= 120; m++) fired.Add(AlertScheduler.Key(e, m));
+        foreach (var t in new[] { now, now.AddMinutes(2), now.AddMinutes(3), now.AddMinutes(10) })
+            Assert.Empty(AlertScheduler.Evaluate([e], t, fired, [15, 5, 1, 0, 30]));
+    }
+}

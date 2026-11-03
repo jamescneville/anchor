@@ -69,24 +69,29 @@ public sealed class AlertWindow : Window
         {
             var join = Ui.Primary("Join meeting", big ? 24 : 14, big ? 12 : 7);
             join.FontSize = big ? 16 : 13;
-            join.Click += (_, _) => { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); Resolve(ack: true); };
+            join.Click += (_, _) => { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); _engine.MarkJoined(_alert.Event); Resolve(ack: true); };
             buttons.Children.Add(join);
         }
         if (e.JoinUrl is not { Length: > 0 } && Anchor.Core.Bridge.SafeLink(e.OpenUrl) is { } open)
         {
             var openBtn = Ui.Primary("Open event", big ? 24 : 14, big ? 12 : 7);
             openBtn.FontSize = big ? 16 : 13;
-            openBtn.Click += (_, _) => { Process.Start(new ProcessStartInfo(open) { UseShellExecute = true }); Resolve(ack: true); };
+            openBtn.Click += (_, _) => { Process.Start(new ProcessStartInfo(open) { UseShellExecute = true }); _engine.MarkJoined(_alert.Event); Resolve(ack: true); };
             buttons.Children.Add(openBtn);
         }
         var snooze = Ui.Secondary($"Snooze {_engine.Settings.SnoozeMinutes} min");
         snooze.Padding = new Thickness(big ? 20 : 12, big ? 12 : 7, big ? 20 : 12, big ? 12 : 7);
         snooze.FontSize = big ? 16 : 13;
         snooze.Click += (_, _) => Resolve(ack: false);
+        var inIt = Ui.Secondary("I'm in it");
+        inIt.ToolTip = "Already there: no more reminders for this meeting";
+        inIt.Padding = snooze.Padding; inIt.FontSize = snooze.FontSize;
+        inIt.Click += (_, _) => { _engine.MarkJoined(_alert.Event); Resolve(ack: true); };
         var ok = Ui.Secondary("Got it");
         ok.Padding = snooze.Padding; ok.FontSize = snooze.FontSize; ok.Margin = new Thickness(0);
         ok.Click += (_, _) => Resolve(ack: true);
         buttons.Children.Add(snooze);
+        buttons.Children.Add(inIt);
         buttons.Children.Add(ok);
         stack.Children.Add(buttons);
 
@@ -110,8 +115,12 @@ public sealed class AlertWindow : Window
             Notify();
             Activate();
         };
-        _clock.Tick += (_, _) => { Refresh(); _ticks++; if (_intensity == "Maximum") Repeat(); };
+        _clock.Tick += (_, _) => { Refresh(); _ticks++; if (_intensity == "Maximum" && !_engine.IsJoined(_alert.Event)) Repeat(); };
         _clock.Start();
+        // Joined from somewhere else (a Teams window opened, or the Join button of a duplicate alert): this window has no job left.
+        void OnJoined(CalendarEvent ev) => Dispatcher.BeginInvoke(() => { if (!_resolved && ev.Id == _alert.Event.Id && ev.Source == _alert.Event.Source) { _resolved = true; Close(); } });
+        _engine.Joined += OnJoined;
+        Closed += (_, _) => _engine.Joined -= OnJoined;
         // Window close without a choice counts as snooze: never silently lose a meeting alert.
         Closed += (_, _) => { _clock.Stop(); if (!_resolved) _engine.Snooze(_alert, _engine.Settings.SnoozeMinutes); };
     }
@@ -132,7 +141,7 @@ public sealed class AlertWindow : Window
 
     void Speak()
     {
-        if (!_engine.Settings.SpeakAlerts) return;
+        if (!_engine.Settings.SpeakAlerts || _engine.IsJoined(_alert.Event)) return;
         var text = SpeechText.Phrase(_alert.Event.Title, _alert.Event.Start, DateTimeOffset.Now);
         var voice = _engine.Settings.SpeechVoice; var rate = _engine.Settings.SpeechRate;
         _ = Task.Run(() => Voice.Say(text, voice, rate));
@@ -147,7 +156,7 @@ public sealed class AlertWindow : Window
     void Resolve(bool ack)
     {
         _resolved = true;
-        if (ack) _engine.Acknowledge(_alert); else _engine.Snooze(_alert, _engine.Settings.SnoozeMinutes);
+        if (ack) { if (!_engine.IsJoined(_alert.Event)) _engine.Acknowledge(_alert); } else _engine.Snooze(_alert, _engine.Settings.SnoozeMinutes);
         Close();
     }
 }
