@@ -281,7 +281,7 @@ public sealed class SweepWindow : Window
             btns.Children.Add(b);
         }
         if (i.Link is { } link) Add("Open", "Open this message in Outlook", () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }), "Accent");
-        Add("+ Today", "Add to today's to-do list", () => _engine.AddTodo(i.Title, i.Link, "Inbox sweep", i.Id));
+        Add("+ Today", "Add to today's to-do list", () => _engine.AddTodo(i.Title, i.Link, "Inbox sweep", i.Id, "Work", i.Priority));
         Add("Handled", "Remove from this list (I dealt with it, or it is not a loose end)", () => _engine.HandleSweepItem(i.Id));
         Add("Trash", "Move the message to Deleted Items on Claude's next sync (recoverable)", () => _engine.QueueTrash(i.Id), "Alarm");
         body.Children.Add(btns);

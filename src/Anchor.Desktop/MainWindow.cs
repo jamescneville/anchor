@@ -23,6 +23,7 @@ public sealed class MainWindow : Window
     readonly WrapPanel _heroButtons = new() { Margin = new Thickness(0, 14, 0, 0) };
     Grid? _cols;
     readonly StackPanel _tasks = new();
+    Border? _todoSwitch;
     readonly TextBlock _plan = new() { FontSize = 13.5, LineHeight = 21 };
     readonly TextBlock _planWhen = new() { FontSize = 11.5, Foreground = Ui.B("Dim"), Margin = new Thickness(0, 8, 0, 0) };
     readonly WrapPanel _problems = new() { Margin = new Thickness(0, 14, 0, 0) };
@@ -62,9 +63,6 @@ public sealed class MainWindow : Window
         var titleBox = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 22, 0), Children = { logo, titleText } };
         DockPanel.SetDock(titleBox, Dock.Left);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        var where = Ui.Primary("Where was I?");
-        where.ToolTip = $"Global hotkey: {_engine.Settings.Hotkey}";
-        where.Click += (_, _) => new RecoveryWindow(_engine, false).Show();
         var refresh = Ui.IconButton("\uE72C", "Refresh calendars and mail now");
         refresh.Click += (_, _) => _ = _engine.RefreshAllAsync(forceMessages: true);
         var sweep = Ui.IconButton("\uE715", "Inbox sweep: every loose end in your mail, ranked");
@@ -72,7 +70,7 @@ public sealed class MainWindow : Window
         var settings = Ui.IconButton("\uE713", "Settings");
         settings.Click += (_, _) => new SettingsWindow(_engine).Show();
         settings.Margin = new Thickness(0);
-        actions.Children.Add(where); actions.Children.Add(sweep); actions.Children.Add(refresh); actions.Children.Add(settings);
+        actions.Children.Add(sweep); actions.Children.Add(refresh); actions.Children.Add(settings);
         DockPanel.SetDock(actions, Dock.Right);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(actions, true);
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(_chips, true);
@@ -117,7 +115,16 @@ public sealed class MainWindow : Window
         agendaDock.Children.Add(agendaHead);
         agendaDock.Children.Add(_agendaHost);
         var left = Ui.Card(agendaDock);
-        var right = Ui.Card(Scroll("To do", _tasks));
+        var todoHead = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
+        var todoLabel = Ui.Label("To do"); todoLabel.Margin = new Thickness(0); todoLabel.VerticalAlignment = VerticalAlignment.Center;
+        _todoSwitch = TodoSwitcher();
+        DockPanel.SetDock(_todoSwitch, Dock.Right);
+        todoHead.Children.Add(_todoSwitch); todoHead.Children.Add(todoLabel);
+        var todoDock = new DockPanel();
+        DockPanel.SetDock(todoHead, Dock.Top);
+        todoDock.Children.Add(todoHead);
+        todoDock.Children.Add(new ScrollViewer { Content = _tasks, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        var right = Ui.Card(todoDock);
         Grid.SetColumn(left, 0); Grid.SetColumn(right, 2);
         cols.Children.Add(left); cols.Children.Add(right);
         Grid.SetRow(cols, 2);
@@ -330,6 +337,32 @@ public sealed class MainWindow : Window
 
     // ------------------------------------------------------------------ agenda views
 
+    /// <summary>All / Personal / Work filter for the to-do list, with counts.</summary>
+    Border TodoSwitcher()
+    {
+        var group = Guid.NewGuid().ToString("N");
+        var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var (key, tip) in new[] { ("All", "Everything"), ("Personal", "Personal only (Gmail and things you add)"), ("Work", "Work only (Outlook, Teams, Slack and the inbox sweep)") })
+        {
+            var rb = new RadioButton
+            {
+                Content = key, Tag = key, GroupName = group, Style = (Style)Application.Current.Resources["Segment"], ToolTip = tip,
+                Padding = new Thickness(10, 5, 10, 5), FontSize = 12, IsChecked = _engine.Store.State.TodoView == key,
+            };
+            rb.Checked += (_, _) =>
+            {
+                if (_engine.Store.State.TodoView == key) return;
+                _engine.Store.Mutate(s => s.TodoView = key);
+                RenderTasks();
+            };
+            panel.Children.Add(rb);
+        }
+        if (!panel.Children.OfType<RadioButton>().Any(r => r.IsChecked == true)) ((RadioButton)panel.Children[0]).IsChecked = true;
+        return new Border { Background = Ui.B("Field"), CornerRadius = new CornerRadius(8), Padding = new Thickness(2), BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(1), Child = panel };
+    }
+
+    static Brush? PriorityBrush(int p) => p switch { 1 => Ui.B("Alarm"), 2 => Ui.B("Warn"), 3 => Ui.B("Accent"), _ => null };
+
     UIElement ViewSwitcher()
     {
         var group = Guid.NewGuid().ToString("N");
@@ -478,12 +511,25 @@ public sealed class MainWindow : Window
     {
         _tasks.Children.Clear();
         var st = _engine.Store.State;
-        var open = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted)
-                           .OrderByDescending(t => t.Status == SuggestionStatus.Accepted).ThenByDescending(t => t.Confidence).ToList();
-        RenderTodos();
-        if (open.Count == 0 && _engine.TodayTodos(DateTimeOffset.Now).Count == 0)
+        var now = DateTimeOffset.Now;
+        var view = st.TodoView;
+        bool In(string g) => view == "All" || view == g;
+        var allOpen = st.Tasks.Where(t => t.Status is SuggestionStatus.Pending or SuggestionStatus.Accepted).ToList();
+        var allTodos = _engine.TodayTodos(now).Where(t => t.DoneAt is null).ToList();
+        if (_todoSwitch?.Child is StackPanel sw)
+            foreach (var rb in sw.Children.OfType<RadioButton>())
+            {
+                var key = (string)rb.Tag;
+                var n = allOpen.Count(t => key == "All" || TaskGroups.GroupOf(t) == key) + allTodos.Count(t => key == "All" || TaskGroups.GroupOf(t) == key);
+                rb.Content = n > 0 ? $"{key} ({n})" : key;
+            }
+        // Most pressing first: overdue, due soon, then the rest by how sure we are it is a task.
+        var open = allOpen.Where(t => In(TaskGroups.GroupOf(t)))
+                          .OrderBy(t => TaskGroups.PriorityOf(t, now)).ThenByDescending(t => t.Status == SuggestionStatus.Accepted).ThenByDescending(t => t.Confidence).ToList();
+        RenderTodos(view);
+        if (open.Count == 0 && _engine.TodayTodos(now).Count(t => In(TaskGroups.GroupOf(t))) == 0)
         {
-            _tasks.Children.Add(Empty("You're clear", "Anything that needs a reply or action shows up here after each mail and chat refresh."));
+            _tasks.Children.Add(Empty(view == "All" ? "You're clear" : $"Nothing in {view}", view == "All" ? "Anything that needs a reply or action shows up here after each mail and chat refresh." : "Switch to All to see the rest."));
             return;
         }
         if (open.Count > 0)
@@ -495,10 +541,11 @@ public sealed class MainWindow : Window
     }
 
     /// <summary>Today's to-do list: things I chose to do today (from the inbox sweep or typed here).</summary>
-    void RenderTodos()
+    void RenderTodos(string view)
     {
         var now = DateTimeOffset.Now;
-        var todos = _engine.TodayTodos(now);
+        var todos = _engine.TodayTodos(now).Where(t => view == "All" || TaskGroups.GroupOf(t) == view)
+                           .OrderBy(t => t.DoneAt is not null).ThenBy(t => TaskGroups.PriorityOf(t)).ThenBy(t => t.Added).ToList();
         var head = Ui.Label($"Today's list{(todos.Count > 0 ? $" · {todos.Count(t => t.DoneAt is null)} left" : "")}");
         head.Margin = new Thickness(2, 0, 0, 8);
         _tasks.Children.Add(head);
@@ -510,7 +557,7 @@ public sealed class MainWindow : Window
             check.Click += (_, _) => _engine.SetTodoDone(t.Id, !done);
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             text.Children.Add(new TextBlock { Text = t.Title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextDecorations = done ? TextDecorations.Strikethrough : null, Opacity = done ? 0.5 : 1 });
-            if (t.Source.Length > 0 && !done) text.Children.Add(new TextBlock { Text = t.Source, FontSize = 11.5, Foreground = Ui.B("Dim") });
+            if (!done) text.Children.Add(new TextBlock { Text = (view == "All" ? TaskGroups.GroupOf(t) + (t.Source.Length > 0 ? " · " : "") : "") + t.Source, FontSize = 11.5, Foreground = Ui.B("Dim") });
             var tools = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             if (Bridge.SafeLink(t.Link) is { } link && !done)
             {
@@ -527,7 +574,8 @@ public sealed class MainWindow : Window
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetColumn(text, 1); Grid.SetColumn(tools, 2);
             g.Children.Add(check); g.Children.Add(text); g.Children.Add(tools);
-            _tasks.Children.Add(new Border { Background = Ui.B("CardRaised"), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 6), Child = g });
+            _tasks.Children.Add(new Border { Background = Ui.B("CardRaised"), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 6), Child = g,
+                BorderBrush = done ? null : PriorityBrush(TaskGroups.PriorityOf(t)), BorderThickness = new Thickness(3, 0, 0, 0) });
         }
 
         var add = new TextBox { MinHeight = 40, FontSize = 13.5, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 0, 12), ToolTip = "Type something to do today and press Enter" };
@@ -537,7 +585,7 @@ public sealed class MainWindow : Window
         {
             if (e.Key != System.Windows.Input.Key.Enter || add.Text.Trim().Length == 0) return;
             e.Handled = true;
-            _engine.AddTodo(add.Text, null, "Added by me");
+            _engine.AddTodo(add.Text, null, "Added by me", null, view == "Work" ? "Work" : "Personal");
         };
         _tasks.Children.Add(new Grid { Children = { add, hint } });
     }
@@ -602,6 +650,7 @@ public sealed class MainWindow : Window
         {
             Background = Ui.B("CardRaised"), CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 12, 14, 10),
             Margin = new Thickness(0, 0, 0, 8), Child = row,
+            BorderBrush = PriorityBrush(TaskGroups.PriorityOf(t, DateTimeOffset.Now)), BorderThickness = new Thickness(3, 0, 0, 0),
         };
         if (t.Confidence < 0.6) card.ToolTip = "Flagged by keywords, not AI. Confidence is low.";
         return card;

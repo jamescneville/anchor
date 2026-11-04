@@ -200,13 +200,13 @@ public sealed class AssistantEngine : IDisposable
         Store.State.Todos.Where(t => t.DoneAt is null || t.DoneAt.Value.LocalDateTime.Date == now.LocalDateTime.Date)
             .OrderBy(t => t.DoneAt is not null).ThenBy(t => t.Added).ToList();
 
-    public void AddTodo(string title, string? link = null, string source = "", string? sweepId = null)
+    public void AddTodo(string title, string? link = null, string source = "", string? sweepId = null, string group = "", int priority = 0)
     {
         title = title.Trim();
         if (title.Length == 0) return;
         Store.Mutate(s =>
         {
-            if (!s.Todos.Any(t => t.DoneAt is null && t.Title == title)) s.Todos.Add(new TodoItem { Title = title, Link = link, Source = source });
+            if (!s.Todos.Any(t => t.DoneAt is null && t.Title == title)) s.Todos.Add(new TodoItem { Title = title, Link = link, Source = source, Group = group, Priority = priority });
             if (sweepId is not null) { s.SweepHandled.Add(sweepId); s.SweepHow[sweepId] = "today"; }
         });
         Changed?.Invoke();

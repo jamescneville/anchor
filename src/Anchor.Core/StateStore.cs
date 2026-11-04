@@ -40,6 +40,8 @@ public sealed class AnchorState
     public List<TodoItem> Todos { get; set; } = new();
     /// <summary>Main-window layout the user dragged to: agenda share of the agenda+to-do width (0..1) and the plan card height in pixels.</summary>
     public double? AgendaRatio { get; set; }
+    /// <summary>To-do filter: All | Personal | Work.</summary>
+    public string TodoView { get; set; } = "All";
     public double? PlanHeight { get; set; }
     public List<KnownCalendar> KnownCalendars { get; set; } = new();
     public DateTimeOffset? BridgeEventsAt { get; set; }

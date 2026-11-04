@@ -86,4 +86,8 @@ public sealed class TodoItem
     public string Source { get; set; } = "";
     public DateTimeOffset Added { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset? DoneAt { get; set; }
+    /// <summary>Personal | Work. Empty means "work out from the source".</summary>
+    public string Group { get; set; } = "";
+    /// <summary>1 (urgent) to 5, from the inbox sweep; 0 when not ranked.</summary>
+    public int Priority { get; set; }
 }

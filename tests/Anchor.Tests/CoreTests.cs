@@ -739,3 +739,33 @@ public class JoinedAlertTests
             Assert.Empty(AlertScheduler.Evaluate([e], t, fired, [15, 5, 1, 0, 30]));
     }
 }
+
+public class TaskGroupTests
+{
+    static SuggestedTask T(string source, double conf = 0.6, DateTimeOffset? due = null, SuggestionStatus st = SuggestionStatus.Pending) =>
+        new() { Source = source, Confidence = conf, Due = due, Status = st };
+
+    [Fact]
+    public void Work_sources_are_work_and_everything_else_is_personal()
+    {
+        Assert.Equal("Work", TaskGroups.GroupOf(T("Outlook")));
+        Assert.Equal("Work", TaskGroups.GroupOf(T("Teams")));
+        Assert.Equal("Work", TaskGroups.GroupOf(T("Claude/Outlook")));
+        Assert.Equal("Personal", TaskGroups.GroupOf(T("Gmail")));
+        Assert.Equal("Work", TaskGroups.GroupOf(new TodoItem { Source = "Inbox sweep" }));
+        Assert.Equal("Personal", TaskGroups.GroupOf(new TodoItem { Source = "Added by me" }));
+        Assert.Equal("Work", TaskGroups.GroupOf(new TodoItem { Source = "Added by me", Group = "Work" }));
+    }
+
+    [Fact]
+    public void Overdue_then_due_soon_then_the_rest()
+    {
+        var now = new DateTimeOffset(2026, 11, 4, 9, 0, 0, TimeSpan.Zero);
+        Assert.Equal(1, TaskGroups.PriorityOf(T("Gmail", due: now.AddHours(-1)), now));
+        Assert.Equal(2, TaskGroups.PriorityOf(T("Gmail", due: now.AddDays(1)), now));
+        Assert.Equal(3, TaskGroups.PriorityOf(T("Gmail", 0.9), now));
+        Assert.Equal(4, TaskGroups.PriorityOf(T("Gmail", 0.4), now));
+        Assert.Equal(3, TaskGroups.PriorityOf(new TodoItem()));
+        Assert.Equal(1, TaskGroups.PriorityOf(new TodoItem { Priority = 1 }));
+    }
+}
