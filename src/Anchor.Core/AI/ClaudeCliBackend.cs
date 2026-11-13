@@ -182,8 +182,9 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
                 if (!isError && exitCode == 0) return new Envelope(result, cost);
                 if (result.Contains("refresh", StringComparison.OrdinalIgnoreCase) && result.Contains("OAuth", StringComparison.OrdinalIgnoreCase))
                     throw new TransientCliException(result);
-                if (result.Contains("not logged in", StringComparison.OrdinalIgnoreCase) || result.Contains("/login", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Claude isn't signed in. Open the Claude app and sign in, then try again.");
+                if (result.Contains("not logged in", StringComparison.OrdinalIgnoreCase) || result.Contains("/login", StringComparison.OrdinalIgnoreCase)
+                    || result.Contains("Failed to authenticate", StringComparison.OrdinalIgnoreCase) || result.Contains("time limit", StringComparison.OrdinalIgnoreCase))
+                    throw new SignInRequiredException();
                 throw new InvalidOperationException(result.Length > 0 ? Clip(result) : Clip(stderr));
             }
             catch (JsonException) { /* fall through */ }
@@ -206,3 +207,6 @@ public sealed class ClaudeCliBackend(string exePath, ClaudeDesktopSettings s, Bu
 }
 
 public sealed class TransientCliException(string message) : Exception(message);
+
+/// <summary>The Claude login used by the command line has expired or was signed out. Fixed by signing in again (Settings, Sign in again).</summary>
+public sealed class SignInRequiredException() : InvalidOperationException("Your Claude sign-in has expired. Open Settings and press “Sign in again”, finish signing in in your browser, then try again.");

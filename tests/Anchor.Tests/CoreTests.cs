@@ -337,8 +337,9 @@ public class ClaudeCliTests
     [Fact]
     public void Signed_out_gets_a_friendly_message()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => ClaudeCliBackend.ParseResult("{\"is_error\":true,\"result\":\"Not logged in - please run /login\"}", "", 1));
-        Assert.Contains("sign in", ex.Message);
+        var ex = Assert.Throws<SignInRequiredException>(() => ClaudeCliBackend.ParseResult("{\"is_error\":true,\"result\":\"Not logged in - please run /login\"}", "", 1));
+        Assert.Contains("Sign in again", ex.Message);
+        Assert.Throws<SignInRequiredException>(() => ClaudeCliBackend.ParseResult("{\"is_error\":true,\"result\":\"Failed to authenticate: this login reached its time limit and cannot be renewed.\"}", "", 1));
     }
 
     [Fact]

@@ -233,7 +233,16 @@ public sealed class SettingsWindow : Window
             var (ok, msg) = await new ClaudeCliBackend(exe!, _s.ClaudeDesktop).TestAsync(CancellationToken.None);
             result.Foreground = Ui.B(ok ? "Ok" : "Alarm"); result.Text = msg; test.IsEnabled = true;
         };
-        _section.Children.Add(Row("Test Claude login", "Makes one tiny request.", new StackPanel { Children = { test, result } }));
+        var signIn = Ui.Secondary("Sign in again");
+        signIn.ToolTip = "Opens Claude's sign-in in a console window and your browser. Finish signing in, then press Test.";
+        signIn.Margin = new Thickness(0, 8, 0, 0);
+        signIn.IsEnabled = exe is not null;
+        signIn.Click += (_, _) =>
+        {
+            try { Process.Start(new ProcessStartInfo(exe!, "auth login --claudeai") { UseShellExecute = true }); result.Foreground = Ui.B("Dim"); result.Text = "Finish signing in in your browser, then press Test."; }
+            catch (Exception ex) { result.Foreground = Ui.B("Alarm"); result.Text = ex.Message; }
+        };
+        _section.Children.Add(Row("Test Claude login", "Makes one tiny request.", new StackPanel { Children = { test, signIn, result } }));
     }
 
     /// <summary>Every calendar Anchor knows about: discovered on accounts, plus any source that currently has events.</summary>
